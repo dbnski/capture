@@ -15,6 +15,7 @@ import (
     "syscall"
     "time"
     "database/sql"
+    "golang.org/x/term"
 
     "github.com/go-ini/ini"
     "github.com/alecthomas/kong"
@@ -25,7 +26,8 @@ var options struct {
     Hostname     string        `name:"hostname"      placeholder:"ADDRESS"                      help:"Server address" required:""`
     Port         string        `name:"port"          placeholder:"PORT"     default:"3306"      help:"Server port"`
     Username     string        `name:"username"      placeholder:"USERNAME"                     help:"Database user"`
-    Password     string        `name:"password"      placeholder:"PASSWORD"                     help:"Database password"`
+    Password     string        `name:"password"      placeholder:"PASSWORD"                     help:"Database password"                    xor:"password"`
+    AskPass      bool          `name:"ask-pass"                                                 help:"Enter database password using prompt" xor:"password"`
     DefaultsFile string        `name:"defaults-file" placeholder:"FILE"                         help:"Read database options from the given file"`
     Path         string        `name:"path"          placeholder:"PATH"     default:"."         help:"Logging directory"`
     Interval     time.Duration `name:"interval"      placeholder:"DURATION" default:"5s"        help:"Duration between collecting data samples"`
@@ -85,6 +87,16 @@ func main() {
         }
     }
 
+    if options.AskPass {
+        fmt.Print("Password: ")
+        passwd, err := term.ReadPassword(int(syscall.Stdin))
+        if err != nil {
+            panic(err.Error())
+        }
+        config.Passwd = string(passwd)
+        fmt.Println()
+    }
+
     dsn := getDSNFromConfig(config)
 
     db, err := sql.Open("mysql", dsn)
@@ -95,6 +107,9 @@ func main() {
 
     db.SetConnMaxLifetime(60 * time.Second)
     db.SetMaxOpenConns(3)
+
+    fmt.Printf("Successfully connected to MySQL.\n")
+    fmt.Printf("Capturing state information at %s interval... (Press Ctrl+C to stop)\n", options.Interval)
 
     if _, err := os.Stat(options.Path); err != nil {
         if os.IsNotExist(err) {
@@ -127,11 +142,13 @@ func main() {
     }()
 
     var wg sync.WaitGroup
+    var mtx sync.Mutex
 
-    wg.Add(2)
+    wg.Add(3)
 
-    go capture_innodb_status(ctx, &wg, db)
-    go capture_processlist(ctx, &wg, db)
+    go capture_innodb_status(ctx, &wg, &mtx, db)
+    go capture_processlist(ctx, &wg, &mtx, db)
+    go capture_global_status(ctx, &wg, &mtx, db)
 
     wg.Wait()
 }
@@ -178,7 +195,7 @@ func (lf *LogFile) Flush() (error) {
     return lf.g.Flush()
 }
 
-func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) {
+func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
     var (
         CaptureName string = "innodb-status"
         EngineType string
@@ -209,6 +226,7 @@ func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) 
 
                 var err error
 
+                mtx.Lock()
                 datepath := filepath.Join(options.Path, now.Format("20060102"))
                 if _, err := os.Stat(datepath); err != nil {
                     if os.IsNotExist(err) {
@@ -219,6 +237,7 @@ func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) 
                         panic(err.Error())
                     }
                 }
+                mtx.Unlock()
 
                 filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
                 file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
@@ -269,7 +288,7 @@ type ProcessList struct {
     RowsExamined uint64
 }
 
-func capture_processlist(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) {
+func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
     var (
         CaptureName string = "processlist"
 
@@ -339,6 +358,7 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) {
 
                 var err error
 
+                mtx.Lock()
                 datepath := filepath.Join(options.Path, now.Format("20060102"))
                 if _, err := os.Stat(datepath); err != nil {
                     if os.IsNotExist(err) {
@@ -349,6 +369,7 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) {
                         panic(err.Error())
                     }
                 }
+                mtx.Unlock()
 
                 filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
                 file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
@@ -404,6 +425,94 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, db *sql.DB) {
                                     pl.Id, pl.User.String, pl.Host.String, pl.Db.String, pl.Command.String, pl.Time, pl.State.String,
                                     pl.RowsSent, pl.RowsExamined, strings.Replace(pl.Info.String, "\n", " ", -1))
                 }
+            }
+
+            fmt.Fprintf(file, "---------+ ---------------------------------------------------------------------\n\n")
+
+            file.Flush()
+        }
+    }
+}
+
+type Variable struct {
+    Name sql.NullString
+    Value sql.NullString
+}
+
+func capture_global_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
+    var (
+        CaptureName string = "global-status"
+
+        file *LogFile
+        filename string
+        timestamp time.Time
+    )
+
+    defer wg.Done()
+
+    record := []interface{} {
+        new(sql.NullString),
+        new(sql.NullString),
+    }
+
+    ticker := time.NewTicker(options.Interval)
+
+    for {
+        select {
+        case <- ctx.Done():
+            if file != nil {
+                file.Close()
+            }
+
+            return
+        case now := <- ticker.C:
+            if timestamp == (time.Time{}) || timestamp.Hour() != now.Hour() {
+                if filename != "" {
+                    file.Close()
+                }
+
+                var err error
+
+                mtx.Lock()
+                datepath := filepath.Join(options.Path, now.Format("20060102"))
+                if _, err := os.Stat(datepath); err != nil {
+                    if os.IsNotExist(err) {
+                        if err := os.Mkdir(datepath, 0750); err != nil {
+                            panic(err.Error())
+                        }
+                    } else {
+                        panic(err.Error())
+                    }
+                }
+                mtx.Unlock()
+
+                filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
+                file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
+                if err != nil {
+                    panic(err.Error())
+                }
+            }
+
+            fmt.Fprintf(file, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
+
+            results, err := db.Query("SHOW GLOBAL STATUS")
+            if err != nil {
+                fmt.Fprintln(file, err.Error())
+                break
+            }
+
+            for results.Next() {
+                err = results.Scan(record...)
+                if err != nil {
+                    panic(err.Error())
+                }
+
+                v := &Variable {
+                    Name:  *record[0].(*sql.NullString),
+                    Value: *record[1].(*sql.NullString),
+                }
+
+                fmt.Fprintf(file, "%s | %s = %s\n", now.Format("15:04:05"), v.Name.String, v.Value.String)
             }
 
             fmt.Fprintf(file, "---------+ ---------------------------------------------------------------------\n\n")
