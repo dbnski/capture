@@ -4,22 +4,20 @@ import (
     "bufio"
     "compress/gzip"
     "context"
-    "errors"
-    "path/filepath"
+    "database/sql"
     "fmt"
-    "io/fs"
     "os"
     "os/signal"
+    "path/filepath"
     "strings"
     "sync"
     "syscall"
     "time"
-    "database/sql"
-    "golang.org/x/term"
 
-    "github.com/go-ini/ini"
     "github.com/alecthomas/kong"
+    "github.com/go-ini/ini"
     "github.com/go-sql-driver/mysql"
+    "golang.org/x/term"
 )
 
 var options struct {
@@ -205,105 +203,124 @@ func main() {
     fmt.Printf("Shutting down.\n")
 }
 
-type LogFile struct {
-    f *os.File
-    g *gzip.Writer
+type RotatingLogWriter struct {
+    fd           *os.File
+    gz           *gzip.Writer
+    prefix       string
+    lastRotation time.Time
+    mu           *sync.Mutex
 }
 
-func OpenFile(name string, flag int, perm fs.FileMode) (*LogFile, error) {
-
-    flag &= os.O_APPEND | os.O_CREATE | os.O_TRUNC | os.O_WRONLY
-
-    if flag == 0 {
-        return nil, errors.New("Invalid argument")
+func NewRotatingLogWriter(mu *sync.Mutex, prefix string) *RotatingLogWriter {
+    return &RotatingLogWriter{
+        mu:     mu,
+        prefix: prefix,
     }
-
-    lf := &LogFile{}
-
-    if f, err := os.OpenFile(name, flag, perm); err != nil {
-        return nil, err
-    } else {
-        lf.f = f
-    }
-
-    lf.g = gzip.NewWriter(lf.f)
-
-    return lf, nil
 }
 
-func (lf *LogFile) Close() (error) {
-    if err := lf.g.Close(); err != nil {
+func (w *RotatingLogWriter) ensurePath(logPath string) error {
+    w.mu.Lock()
+    defer w.mu.Unlock()
+
+    if _, err := os.Stat(logPath); err != nil {
+        if os.IsNotExist(err) {
+            if err := os.Mkdir(logPath, 0750); err != nil {
+                return err
+            }
+        } else {
+            return err
+        }
+    }
+    return nil
+}
+
+func (w *RotatingLogWriter) EnsureRotated() error {
+    now  := time.Now()
+    then := w.lastRotation
+
+    if then != (time.Time{}) && then.Hour() == now.Hour() {
+        return nil
+    }
+
+    if w.fd != nil {
+        if err := w.gz.Close(); err != nil {
+            return err
+        }
+        if err := w.fd.Close(); err != nil {
+            return err
+        }
+        w.fd = nil
+        w.gz = nil
+    }
+
+    logPath := filepath.Join(options.Path, now.Format("20060102"))
+    if err := w.ensurePath(logPath); err != nil {
         return err
     }
 
-    return lf.f.Close()
+    filename := filepath.Join(logPath, w.prefix + "." + now.Format("20060102T1500") + ".gz")
+    fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
+    if err != nil {
+        return err
+    }
+
+    w.fd = fd
+    w.gz = gzip.NewWriter(w.fd)
+    w.lastRotation = now
+
+    fmt.Printf("Capturing %s to: %s\n", w.prefix,filename)
+
+    return nil
 }
 
-func (lf *LogFile) Write(buffer []byte) (int, error) {
-    return lf.g.Write(buffer)
+func (w *RotatingLogWriter) Write(p []byte) (int, error) {
+    return w.gz.Write(p)
 }
 
-func (lf *LogFile) Flush() (error) {
-    return lf.g.Flush()
+func (w *RotatingLogWriter) Flush() error {
+    return w.gz.Flush()
+}
+
+func (w *RotatingLogWriter) Close() error {
+    if w.gz != nil {
+        if err := w.gz.Close(); err != nil {
+            return err
+        }
+    }
+    if w.fd != nil {
+        return w.fd.Close()
+    }
+    return nil
 }
 
 func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
-    var (
-        captureName string = "innodb-status"
+    defer wg.Done()
 
+    var (
         engineType   string
         engineName   string
         engineStatus string
-
-        file *LogFile
-        filename string
-        timestamp time.Time
     )
 
-    defer wg.Done()
+    writer := NewRotatingLogWriter(mu, "innodb-status")
+    defer writer.Close()
 
     ticker := time.NewTicker(options.Interval)
 
     for {
         select {
         case <- ctx.Done():
-            if file != nil {
-                file.Close()
-            }
             return
         case now := <- ticker.C:
-            if timestamp == (time.Time{}) || timestamp.Hour() != now.Hour() {
-                if filename != "" {
-                    file.Close()
-                }
-
-                var err error
-
-                mu.Lock()
-                logPath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(logPath); err != nil {
-                    if os.IsNotExist(err) {
-                        if err := os.Mkdir(logPath, 0750); err != nil {
-                            panic(err.Error())
-                        }
-                    } else {
-                        panic(err.Error())
-                    }
-                }
-                mu.Unlock()
-
-                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
-                file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
-                if err != nil {
-                    panic(err.Error())
-                }
+            if err := writer.EnsureRotated(); err != nil {
+                panic(err.Error())
             }
 
-            fmt.Fprintf(file, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
+            fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
 
             results, err := db.Query("SHOW ENGINE INNODB STATUS")
             if err != nil {
-                fmt.Fprintln(file, err.Error())
+                fmt.Fprintln(writer, err.Error())
                 break
             }
 
@@ -317,13 +334,13 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
                 scanner := bufio.NewScanner(reader)
 
                 for scanner.Scan() {
-                    fmt.Fprintf(file, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
+                    fmt.Fprintf(writer, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
                 }
             }
 
-            fmt.Fprintf(file, "---------+ ---------------------------------------------------------------------\n\n")
+            fmt.Fprintf(writer, "---------+ ---------------------------------------------------------------------\n\n")
 
-            file.Flush()
+            writer.Flush()
         }
     }
 }
@@ -345,13 +362,8 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
         RowsExamined uint64
     }
 
-    var (
-        captureName string = "processlist"
-
-        file *LogFile
-        filename string
-        timestamp time.Time
-    )
+    writer := NewRotatingLogWriter(mu, "processlist")
+    defer writer.Close()
 
     columns := func () ([]string) {
         results, err := db.Query("SHOW FULL PROCESSLIST")
@@ -393,44 +405,17 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
     for {
         select {
         case <- ctx.Done():
-            if file != nil {
-                file.Close()
-            }
-
             return
         case now := <- ticker.C:
-            if timestamp == (time.Time{}) || timestamp.Hour() != now.Hour() {
-                if filename != "" {
-                    file.Close()
-                }
-
-                var err error
-
-                mu.Lock()
-                logPath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(logPath); err != nil {
-                    if os.IsNotExist(err) {
-                        if err := os.Mkdir(logPath, 0750); err != nil {
-                            panic(err.Error())
-                        }
-                    } else {
-                        panic(err.Error())
-                    }
-                }
-                mu.Unlock()
-
-                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
-                file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
-                if err != nil {
-                    panic(err.Error())
-                }
+            if err := writer.EnsureRotated(); err != nil {
+                panic(err.Error())
             }
 
-            fmt.Fprintf(file, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
+            fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
 
             results, err := db.Query("SHOW FULL PROCESSLIST")
             if err != nil {
-                fmt.Fprintln(file, err.Error())
+                fmt.Fprintln(writer, err.Error())
                 break
             }
 
@@ -466,23 +451,23 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 
                 switch len(record) {
                 case 8:
-                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s\n",
+                    fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s\n",
                         timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
                         pl.Command.String, pl.Time, pl.State.String, info)
                 case 10:
-                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t%s\n",
+                    fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t%s\n",
                         timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
                         pl.Command.String, pl.Time, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
                 case 11:
-                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t%s\n",
+                    fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t%s\n",
                         timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
                         pl.Command.String, pl.Time, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
                 }
             }
 
-            fmt.Fprintf(file, "---------+ ---------------------------------------------------------------------\n\n")
+            fmt.Fprintf(writer, "---------+ ---------------------------------------------------------------------\n\n")
 
-            file.Flush()
+            writer.Flush()
         }
     }
 }
@@ -491,17 +476,12 @@ func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
     defer wg.Done()
 
     type Variable struct {
-        Name sql.NullString
+        Name  sql.NullString
         Value sql.NullString
     }
 
-    var (
-        captureName string = "global-status"
-
-        file *LogFile
-        filename string
-        timestamp time.Time
-    )
+    writer := NewRotatingLogWriter(mu, "global-status")
+    defer writer.Close()
 
     record := []interface{} {
         new(sql.NullString),
@@ -513,44 +493,17 @@ func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
     for {
         select {
         case <- ctx.Done():
-            if file != nil {
-                file.Close()
-            }
-
             return
         case now := <- ticker.C:
-            if timestamp == (time.Time{}) || timestamp.Hour() != now.Hour() {
-                if filename != "" {
-                    file.Close()
-                }
-
-                var err error
-
-                mu.Lock()
-                logPath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(logPath); err != nil {
-                    if os.IsNotExist(err) {
-                        if err := os.Mkdir(logPath, 0750); err != nil {
-                            panic(err.Error())
-                        }
-                    } else {
-                        panic(err.Error())
-                    }
-                }
-                mu.Unlock()
-
-                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
-                file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
-                if err != nil {
-                    panic(err.Error())
-                }
+            if err := writer.EnsureRotated(); err != nil {
+                panic(err.Error())
             }
 
-            fmt.Fprintf(file, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
+            fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
 
             results, err := db.Query("SHOW GLOBAL STATUS")
             if err != nil {
-                fmt.Fprintln(file, err.Error())
+                fmt.Fprintln(writer, err.Error())
                 break
             }
 
@@ -560,17 +513,17 @@ func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
                     panic(err.Error())
                 }
 
-                v := &Variable {
+                v := &Variable{
                     Name:  *record[0].(*sql.NullString),
                     Value: *record[1].(*sql.NullString),
                 }
 
-                fmt.Fprintf(file, "%s | %s = %s\n", now.Format("15:04:05"), v.Name.String, v.Value.String)
+                fmt.Fprintf(writer, "%s | %s = %s\n", now.Format("15:04:05"), v.Name.String, v.Value.String)
             }
 
-            fmt.Fprintf(file, "---------+ ---------------------------------------------------------------------\n\n")
+            fmt.Fprintf(writer, "---------+ ---------------------------------------------------------------------\n\n")
 
-            file.Flush()
+            writer.Flush()
         }
     }
 }
