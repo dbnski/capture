@@ -23,45 +23,81 @@ import (
 )
 
 var options struct {
-    Hostname     string        `name:"hostname"      placeholder:"ADDRESS"                      help:"Server address" required:""`
-    Port         string        `name:"port"          placeholder:"PORT"     default:"3306"      help:"Server port"`
-    Username     string        `name:"username"      placeholder:"USERNAME"                     help:"Database user"`
-    Password     string        `name:"password"      placeholder:"PASSWORD"                     help:"Database password"                    xor:"password"`
-    AskPass      bool          `name:"ask-pass"                                                 help:"Enter database password using prompt" xor:"password"`
-    DefaultsFile string        `name:"defaults-file" placeholder:"FILE"                         help:"Read database options from the given file"`
-    Path         string        `name:"path"          placeholder:"PATH"     default:"."         help:"Logging directory"`
-    Interval     time.Duration `name:"interval"      placeholder:"DURATION" default:"5s"        help:"Duration between collecting data samples"`
+    Hostname      string        `name:"hostname" 
+                                 placeholder:"ADDRESS" 
+                                 default:"localhost" 
+                                 help:"Database address"`
+    Socket        string        `name:"socket" 
+                                 placeholder:"PATH" 
+                                 default:"/var/run/mysqld/mysqld.sock" 
+                                 help:"Database unix socket (used when hostname is localhost)"`
+    Port          string        `name:"port" 
+                                 placeholder:"PORT" 
+                                 default:"3306" 
+                                 help:"Database port"`
+    Username      string        `name:"username" 
+                                 placeholder:"USERNAME" 
+                                 help:"Database user"`
+    Password      string        `name:"password" 
+                                 xor:"password" 
+                                 placeholder:"PASSWORD" 
+                                 help:"Database password"`
+    AskPass       bool          `name:"ask-pass" 
+                                 xor:"password" 
+                                 help:"Prompt for a password"`
+    TLS           bool          `name:"tls" 
+                                 help:"Use TLS connection to database"`
+    DefaultsFile  string        `name:"defaults-file" 
+                                 placeholder:"FILE" 
+                                 help:"Default database options file"`
+    DefaultsGroup string        `name:"defaults-group" 
+                                 placeholder:"NAME" 
+                                 default:"client" 
+                                 help:"Defaults file section name"`
+    Interval      time.Duration `name:"interval" 
+                                 placeholder:"DURATION" 
+                                 default:"5s" 
+                                 help:"Interval for collecting data"`
+    Path          string        `name:"path" 
+                                 placeholder:"PATH" 
+                                 default:"." 
+                                 help:"Output directory"`
 }
 
-func getDSNFromConfig(config *mysql.Config) (string) {
-    return config.FormatDSN()
-}
+func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) error {
+    options := ini.LoadOptions{
+        AllowBooleanKeys: true,
+        IgnoreContinuation: true,
+        IgnoreInlineComment: true,
+    }
 
-func getConfigFromDefaultsFile(defaults_file string, config *mysql.Config) (error) {
-
-    params, err := ini.LoadSources(ini.LoadOptions{AllowBooleanKeys: true}, defaults_file)
+    params, err := ini.LoadSources(options, defaultsFile)
     if err != nil {
         return err
     }
 
     for _, s := range params.Sections() {
-        if s.Name() != "client" {
-                continue
+        if s.Name() != defaultsGroup {
+            continue
         }
 
-        if config.User == "" && s.Key("user").String() != "" {
-            config.User = s.Key("user").String()
+        if c.User == "" && s.Key("user").String() != "" {
+            c.User = s.Key("user").String()
         }
-        if config.Passwd == "" && s.Key("password").String() != "" {
-            config.Passwd = s.Key("password").String()
+        if c.Passwd == "" && s.Key("password").String() != "" {
+            c.Passwd = s.Key("password").String()
         }
-        if config.Addr == "" && s.Key("hostname").String() != "" {
-            config.Net = "tcp"
-            config.Addr = s.Key("hostname").String()
+        if c.Addr == "" && s.Key("socket").String() != "" {
+            c.Net = "unix"
+            c.Addr = s.Key("socket").String()
         }
-        if config.Addr == "" && s.Key("port").String() != "" {
-            addr := strings.Split(config.Addr, ":")
-            config.Addr = addr[0] + ":" + s.Key("port").String()
+        if c.Addr == "" && s.Key("hostname").String() != "" {
+            c.Net = "tcp"
+            c.Addr = s.Key("hostname").String()
+        }
+        if c.Addr == "" && s.Key("port").String() != "" {
+            addr := strings.Split(c.Addr, ":")
+            c.Addr = addr[0] + ":" + s.Key("port").String()
         }
 
         return nil
@@ -73,16 +109,29 @@ func getConfigFromDefaultsFile(defaults_file string, config *mysql.Config) (erro
 func main() {
     kong.Parse(&options, kong.UsageOnError())
 
-    config := &mysql.Config {
-        Addr:                 options.Hostname + ":" + options.Port,
-        Net:                  "tcp",
-        User:                 options.Username,
-        Passwd:               options.Password,
-        AllowNativePasswords: true,
+    config := &mysql.Config{
+            User:                 options.Username,
+            Passwd:               options.Password,
+            AllowNativePasswords: true,
+    }
+
+    if options.Hostname == "" || options.Hostname == "localhost" || options.Hostname == "127.0.0.1" {
+        config.Net  = "unix"
+        config.Addr = options.Socket
+    } else {
+        config.Net  = "tcp"
+        config.Addr = options.Hostname + ":" + options.Port
+    }
+
+    if options.TLS {
+        config.Params = map[string]string{
+            "tls": "skip-verify",
+        }
+        config.TLSConfig = "skip-verify"
     }
 
     if options.DefaultsFile != "" {
-        if err := getConfigFromDefaultsFile(options.DefaultsFile, config); err != nil {
+        if err := loadConfigFile(config, options.DefaultsFile, options.DefaultsGroup); err != nil {
             panic(err.Error())
         }
     }
@@ -97,9 +146,7 @@ func main() {
         fmt.Println()
     }
 
-    dsn := getDSNFromConfig(config)
-
-    db, err := sql.Open("mysql", dsn)
+    db, err := sql.Open("mysql", config.FormatDSN())
     if err != nil {
         panic(err.Error())
     }
@@ -107,6 +154,12 @@ func main() {
 
     db.SetConnMaxLifetime(60 * time.Second)
     db.SetMaxOpenConns(3)
+
+    _, err = db.Query("SELECT VERSION()")
+    if err != nil {
+        fmt.Println(err.Error())
+        os.Exit(255)
+    }
 
     fmt.Printf("Successfully connected to MySQL.\n")
     fmt.Printf("Capturing state information at %s interval... (Press Ctrl+C to stop)\n", options.Interval)
@@ -136,21 +189,20 @@ func main() {
             cancel()
         case <- ctx.Done():
         }
-
-        <-signals
-        os.Exit(-1)
     }()
 
     var wg sync.WaitGroup
-    var mtx sync.Mutex
+    var mu sync.Mutex
 
     wg.Add(3)
 
-    go capture_innodb_status(ctx, &wg, &mtx, db)
-    go capture_processlist(ctx, &wg, &mtx, db)
-    go capture_global_status(ctx, &wg, &mtx, db)
+    go captureInnodbStatus(ctx, &wg, &mu, db)
+    go captureProcesslist(ctx, &wg, &mu, db)
+    go captureGlobalStatus(ctx, &wg, &mu, db)
 
     wg.Wait()
+
+    fmt.Printf("Shutting down.\n")
 }
 
 type LogFile struct {
@@ -195,12 +247,13 @@ func (lf *LogFile) Flush() (error) {
     return lf.g.Flush()
 }
 
-func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
+func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
     var (
-        CaptureName string = "innodb-status"
-        EngineType string
-        EngineName string
-        EngineStatus string
+        captureName string = "innodb-status"
+
+        engineType   string
+        engineName   string
+        engineStatus string
 
         file *LogFile
         filename string
@@ -226,20 +279,20 @@ func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mu
 
                 var err error
 
-                mtx.Lock()
-                datepath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(datepath); err != nil {
+                mu.Lock()
+                logPath := filepath.Join(options.Path, now.Format("20060102"))
+                if _, err := os.Stat(logPath); err != nil {
                     if os.IsNotExist(err) {
-                        if err := os.Mkdir(datepath, 0750); err != nil {
+                        if err := os.Mkdir(logPath, 0750); err != nil {
                             panic(err.Error())
                         }
                     } else {
                         panic(err.Error())
                     }
                 }
-                mtx.Unlock()
+                mu.Unlock()
 
-                filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
+                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
                 file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
                 if err != nil {
                     panic(err.Error())
@@ -255,16 +308,16 @@ func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mu
             }
 
             for results.Next() {
-                err = results.Scan(&EngineType, &EngineName, &EngineStatus)
+                err = results.Scan(&engineType, &engineName, &engineStatus)
                 if err != nil {
                     panic(err.Error())
                 }
 
-                reader := strings.NewReader(EngineStatus)
+                reader := strings.NewReader(engineStatus)
                 scanner := bufio.NewScanner(reader)
 
                 for scanner.Scan() {
-                fmt.Fprintf(file, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
+                    fmt.Fprintf(file, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
                 }
             }
 
@@ -275,29 +328,30 @@ func capture_innodb_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mu
     }
 }
 
-type ProcessList struct {
-    Id uint64
-    User sql.NullString
-    Host sql.NullString
-    Db sql.NullString
-    Command sql.NullString
-    Time uint32
-    State sql.NullString
-    Info sql.NullString
-    RowsSent uint64
-    RowsExamined uint64
-}
+func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
+    defer wg.Done()
 
-func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
+    type ProcessList struct {
+        Id           uint64
+        User         sql.NullString
+        Host         sql.NullString
+        Db           sql.NullString
+        Command      sql.NullString
+        Time         uint32
+        State        sql.NullString
+        Info         sql.NullString
+        TimeMs       uint64
+        RowsSent     uint64
+        RowsExamined uint64
+    }
+
     var (
-        CaptureName string = "processlist"
+        captureName string = "processlist"
 
         file *LogFile
         filename string
         timestamp time.Time
     )
-
-    defer wg.Done()
 
     columns := func () ([]string) {
         results, err := db.Query("SHOW FULL PROCESSLIST")
@@ -314,30 +368,24 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mute
         return columns
     }()
 
-    record := []interface{} {
-        new(uint64),
-        new(sql.NullString),
-        new(sql.NullString),
-        new(sql.NullString),
-        new(sql.NullString),
-        new(uint32),
-        new(sql.NullString),
-        new(sql.NullString),
-    }
+    record := make([]interface{}, len(columns))
+    record[0] = new(uint64)         // Id
+    record[1] = new(sql.NullString) // User
+    record[2] = new(sql.NullString) // Host
+    record[3] = new(sql.NullString) // Db
+    record[4] = new(sql.NullString) // Command
+    record[5] = new(uint32)         // Time
+    record[6] = new(sql.NullString) // State
+    record[7] = new(sql.NullString) // Info
 
-    if len(columns) == 10 {
-        record = []interface{} {
-            new(uint64),
-            new(sql.NullString),
-            new(sql.NullString),
-            new(sql.NullString),
-            new(sql.NullString),
-            new(uint32),
-            new(sql.NullString),
-            new(sql.NullString),
-            new(uint64),
-            new(uint64),
-        }
+    switch len(columns) {
+    case 10:
+        record[8] = new(uint64)     // RowsSent
+        record[9] = new(uint64)     // RowsExamined
+    case 11:
+        record[8] = new(uint64)     // TimeMs
+        record[9] = new(uint64)     // RowsSent
+        record[10] = new(uint64)    // RowsExamined
     }
 
     ticker := time.NewTicker(options.Interval)
@@ -358,20 +406,20 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mute
 
                 var err error
 
-                mtx.Lock()
-                datepath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(datepath); err != nil {
+                mu.Lock()
+                logPath := filepath.Join(options.Path, now.Format("20060102"))
+                if _, err := os.Stat(logPath); err != nil {
                     if os.IsNotExist(err) {
-                        if err := os.Mkdir(datepath, 0750); err != nil {
+                        if err := os.Mkdir(logPath, 0750); err != nil {
                             panic(err.Error())
                         }
                     } else {
                         panic(err.Error())
                     }
                 }
-                mtx.Unlock()
+                mu.Unlock()
 
-                filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
+                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
                 file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
                 if err != nil {
                     panic(err.Error())
@@ -392,38 +440,43 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mute
                     panic(err.Error())
                 }
 
-                if len(record) == 8 {
-                    pl := &ProcessList {
-                        Id: *record[0].(*uint64),
-                        User: *record[1].(*sql.NullString),
-                        Host: *record[2].(*sql.NullString),
-                        Db: *record[3].(*sql.NullString),
-                        Command: *record[4].(*sql.NullString),
-                        Time: *record[5].(*uint32),
-                        State: *record[6].(*sql.NullString),
-                        Info: *record[7].(*sql.NullString),
-                    }
+                pl := &ProcessList{
+                    Id:      *record[0].(*uint64),
+                    User:    *record[1].(*sql.NullString),
+                    Host:    *record[2].(*sql.NullString),
+                    Db:      *record[3].(*sql.NullString),
+                    Command: *record[4].(*sql.NullString),
+                    Time:    *record[5].(*uint32),
+                    State:   *record[6].(*sql.NullString),
+                    Info:    *record[7].(*sql.NullString),
+                }
 
-                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s\n", now.Format("15:04:05"), 
-                                    pl.Id, pl.User.String, pl.Host.String, pl.Db.String, pl.Command.String, pl.Time, pl.State.String,
-                                    strings.Replace(pl.Info.String, "\n", " ", -1))
-                } else if len(record) == 10 {
-                    pl := &ProcessList {
-                        Id: *record[0].(*uint64),
-                        User: *record[1].(*sql.NullString),
-                        Host: *record[2].(*sql.NullString),
-                        Db: *record[3].(*sql.NullString),
-                        Command: *record[4].(*sql.NullString),
-                        Time: *record[5].(*uint32),
-                        State: *record[6].(*sql.NullString),
-                        Info: *record[7].(*sql.NullString),
-                        RowsSent: *record[8].(*uint64),
-                        RowsExamined: *record[9].(*uint64),
-                    }
+                switch len(record) {
+                case 10:
+                    pl.RowsSent     = *record[8].(*uint64)
+                    pl.RowsExamined = *record[9].(*uint64)
+                case 11:
+                    pl.TimeMs       = *record[8].(*uint64)
+                    pl.RowsSent     = *record[9].(*uint64)
+                    pl.RowsExamined = *record[10].(*uint64)
+                }
 
-                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t%s\n", now.Format("15:04:05"), 
-                                    pl.Id, pl.User.String, pl.Host.String, pl.Db.String, pl.Command.String, pl.Time, pl.State.String,
-                                    pl.RowsSent, pl.RowsExamined, strings.Replace(pl.Info.String, "\n", " ", -1))
+                info := strings.Replace(pl.Info.String, "\n", " ", -1)
+                timestamp := now.Format("15:04:05")
+
+                switch len(record) {
+                case 8:
+                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s\n",
+                        timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
+                        pl.Command.String, pl.Time, pl.State.String, info)
+                case 10:
+                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t%s\n",
+                        timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
+                        pl.Command.String, pl.Time, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
+                case 11:
+                    fmt.Fprintf(file, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t%s\n",
+                        timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
+                        pl.Command.String, pl.Time, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
                 }
             }
 
@@ -434,21 +487,21 @@ func capture_processlist(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mute
     }
 }
 
-type Variable struct {
-    Name sql.NullString
-    Value sql.NullString
-}
+func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
+    defer wg.Done()
 
-func capture_global_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mutex, db *sql.DB) {
+    type Variable struct {
+        Name sql.NullString
+        Value sql.NullString
+    }
+
     var (
-        CaptureName string = "global-status"
+        captureName string = "global-status"
 
         file *LogFile
         filename string
         timestamp time.Time
     )
-
-    defer wg.Done()
 
     record := []interface{} {
         new(sql.NullString),
@@ -473,20 +526,20 @@ func capture_global_status(ctx context.Context, wg *sync.WaitGroup, mtx *sync.Mu
 
                 var err error
 
-                mtx.Lock()
-                datepath := filepath.Join(options.Path, now.Format("20060102"))
-                if _, err := os.Stat(datepath); err != nil {
+                mu.Lock()
+                logPath := filepath.Join(options.Path, now.Format("20060102"))
+                if _, err := os.Stat(logPath); err != nil {
                     if os.IsNotExist(err) {
-                        if err := os.Mkdir(datepath, 0750); err != nil {
+                        if err := os.Mkdir(logPath, 0750); err != nil {
                             panic(err.Error())
                         }
                     } else {
                         panic(err.Error())
                     }
                 }
-                mtx.Unlock()
+                mu.Unlock()
 
-                filename = filepath.Join(datepath, CaptureName + "." + now.Format("20060102T1500") + ".gz")
+                filename = filepath.Join(logPath, captureName + "." + now.Format("20060102T1500") + ".gz")
                 file, err = OpenFile(filename, os.O_WRONLY | os.O_CREATE | os.O_APPEND, 0640)
                 if err != nil {
                     panic(err.Error())
