@@ -145,7 +145,6 @@ func main() {
             os.Exit(1)
         }
         config.Passwd = string(passwd)
-        slog.Info("")
     }
 
     db, err := sql.Open("mysql", config.FormatDSN())
@@ -220,7 +219,6 @@ func main() {
     var mu sync.Mutex
 
     wg.Add(3)
-
     go captureInnodbStatus(ctx, &wg, &mu, db)
     go captureProcesslist(ctx, &wg, &mu, db)
     go captureGlobalStatus(ctx, &wg, &mu, db)

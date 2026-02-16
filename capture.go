@@ -185,7 +185,6 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
 	defer wg.Done()
 
-
 	capture(ctx, mu, db, "global-status", func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error {
 		type Variable struct {
 			Name  sql.NullString
