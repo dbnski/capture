@@ -28,7 +28,7 @@ var options struct {
     Socket        string        `name:"socket" 
                                  placeholder:"PATH" 
                                  default:"/var/run/mysqld/mysqld.sock" 
-                                 help:"Database unix socket (used when hostname is localhost)"`
+                                 help:"Database unix socket"`
     Port          string        `name:"port" 
                                  placeholder:"PORT" 
                                  default:"3306" 
