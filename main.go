@@ -79,9 +79,6 @@ func main() {
     }
 
     if options.TLS {
-        config.Params = map[string]string{
-            "tls": "skip-verify",
-        }
         config.TLSConfig = "skip-verify"
     }
 
