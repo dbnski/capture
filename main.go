@@ -3,6 +3,7 @@ package main
 import (
     "context"
     "database/sql"
+    "fmt"
     "log/slog"
     "os"
     "os/signal"
@@ -57,8 +58,22 @@ var options struct {
                                  help:"Output directory"`
 }
 
+var (
+    Version    = "0.0.0"
+    CommitHash = "0000000"
+    Build      = "dev"
+    BuildTime  = "(recently)"
+)
+
 func main() {
-    kong.Parse(&options, kong.UsageOnError())
+    kong.Parse(
+        &options,
+        kong.Description(
+            fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
+        kong.UsageOnError(),
+    )
+
+    slog.Info("Version", "version", Version, "build", Build, "commit", CommitHash)
 
     if options.Hostname == "" {
         slog.Error("--hostname is required")
