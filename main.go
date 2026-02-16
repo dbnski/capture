@@ -86,9 +86,9 @@ func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) 
             c.Net = "unix"
             c.Addr = s.Key("socket").String()
         }
-        if c.Addr == "" && s.Key("hostname").String() != "" {
+        if c.Addr == "" && s.Key("host").String() != "" {
             c.Net = "tcp"
-            c.Addr = s.Key("hostname").String()
+            c.Addr = s.Key("host").String()
         }
         if c.Addr == "" && s.Key("port").String() != "" {
             addr := strings.Split(c.Addr, ":")
