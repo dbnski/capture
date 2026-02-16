@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, capture func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error) {
@@ -77,6 +79,22 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 
 		return nil
 	})
+}
+
+func writeInSingleLineUnsafe(w *RotatingLogWriter, s string) {
+	b := unsafe.Slice(unsafe.StringData(s), len(s))
+
+	start := 0
+	for {
+		i := bytes.IndexByte(b[start:], '\n')
+		if i == -1 {
+			w.Write(b[start:])
+			break
+		}
+		w.Write(b[start : start+i])
+		w.Write([]byte{' '})
+		start += i + 1
+	}
 }
 
 func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
@@ -164,22 +182,29 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 				return errors.New("Unexpected number of columns in processlist")
 			}
 
-			info := strings.Replace(pl.Info.String, "\n", " ", -1)
 			timestamp := now.Format("15:04:05")
 
 			switch len(record) {
 			case 8:
-				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s\n",
+				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.State.String, info)
+					pl.Command.String, pl.Time, pl.State.String)
+				writeInSingleLineUnsafe(writer, pl.Info.String)
+				fmt.Fprintln(writer)
 			case 10:
-				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t%s\n",
+				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
+					pl.Command.String, pl.Time, pl.State.String, pl.RowsSent, pl.RowsExamined)
+				writeInSingleLineUnsafe(writer, pl.Info.String)
+				fmt.Fprintln(writer)
 			case 11:
-				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t%s\n",
+				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined, info)
+					pl.Command.String, pl.Time, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined)
+				writeInSingleLineUnsafe(writer, pl.Info.String)
+				fmt.Fprintln(writer)
+			default:
+				return errors.New("Unexpected number of columns in processlist")
 			}
 		}
 
