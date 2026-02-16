@@ -1,15 +1,15 @@
 module capture
 
-go 1.21
+go 1.24.0
 
 require (
-	github.com/alecthomas/kong v0.5.0
-	github.com/go-ini/ini v1.66.4
-	github.com/go-sql-driver/mysql v1.6.0
-	golang.org/x/term v0.7.0
+	github.com/alecthomas/kong v1.14.0
+	github.com/go-sql-driver/mysql v1.9.3
+	golang.org/x/term v0.40.0
+	gopkg.in/ini.v1 v1.67.1
 )
 
 require (
-	github.com/pkg/errors v0.9.1 // indirect
-	golang.org/x/sys v0.7.0 // indirect
+	filippo.io/edwards25519 v1.1.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 )

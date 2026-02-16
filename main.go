@@ -13,7 +13,7 @@ import (
     "time"
 
     "github.com/alecthomas/kong"
-    "github.com/go-ini/ini"
+    "gopkg.in/ini.v1"
     "github.com/go-sql-driver/mysql"
     "golang.org/x/term"
 )
