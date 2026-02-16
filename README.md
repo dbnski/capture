@@ -5,18 +5,25 @@ A simple tool for capturing MySQL/MariaDB state information at regular intervals
 ## What it does
 
 Connects to your MySQL database and continuously captures three things:
+- Process list
 - InnoDB engine status
-- Process list (active queries)
 - Global status variables
 
 Everything gets written to compressed, hourly-rotated log files organized by date.
+
+## Database Permissions
+
+Your database user needs the `PROCESS` and `SUPER` privileges:
+```sql
+GRANT PROCESS, SUPER ON *.* TO 'monitor'@'localhost';
+```
 
 ## Quick Start
 
 Run:
 ```bash
 # Connect and start capturing (default: 5 second intervals)
-./capture --username root --ask-pass
+./capture --username monitor --ask-pass
 
 # Specify output directory and interval
 ./capture --username monitor --password secret --path ./logs --interval 10s
@@ -33,7 +40,7 @@ Connect via TCP:
 
 Connect via Unix socket (default for localhost):
 ```bash
-./capture --username root --ask-pass
+./capture --username monitor --ask-pass
 ```
 
 Use a MySQL config file:
@@ -41,16 +48,11 @@ Use a MySQL config file:
 ./capture --defaults-file ~/.my.cnf
 ```
 
-Enable TLS:
-```bash
-./capture --hostname db.example.com --username monitor --password secret --tls
-```
-
 ## Output
 
 Files are organized like this:
 ```
-output-path/
+logs/
 └── 20260216/
     ├── innodb-status.20260216T1500.gz
     ├── processlist.20260216T1500.gz
@@ -60,11 +62,4 @@ output-path/
 Each file contains timestamped snapshots that you can analyze later:
 ```bash
 zcat logs/20260216/processlist.*.gz | grep "SELECT"
-```
-
-## Database Permissions
-
-Your database user needs the `PROCESS` and `SUPER` privileges:
-```sql
-GRANT PROCESS, SUPER ON *.* TO 'monitor'@'localhost';
 ```
