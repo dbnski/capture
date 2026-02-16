@@ -56,8 +56,11 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 			engineStatus string
 		)
 
-		results, err := db.Query("SHOW ENGINE INNODB STATUS")
+		results, err := db.QueryContext(ctx, "SHOW ENGINE INNODB STATUS")
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			return err
 		}
 
@@ -84,16 +87,16 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 func writeInSingleLineUnsafe(w *RotatingLogWriter, s string) {
 	b := unsafe.Slice(unsafe.StringData(s), len(s))
 
-	start := 0
+	p := 0
 	for {
-		i := bytes.IndexByte(b[start:], '\n')
+		i := bytes.IndexByte(b[p:], '\n')
 		if i == -1 {
-			w.Write(b[start:])
+			w.Write(b[p:])
 			break
 		}
-		w.Write(b[start : start+i])
+		w.Write(b[p : p+i])
 		w.Write([]byte{' '})
-		start += i + 1
+		p += i + 1
 	}
 }
 
@@ -115,8 +118,11 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 			RowsExamined uint64
 		}
 
-		results, err := db.Query("SHOW FULL PROCESSLIST")
+		results, err := db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			return  err
 		}
 		columns, err := results.Columns()
@@ -226,8 +232,11 @@ func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 			new(sql.NullString),
 		}
 
-		results, err := db.Query("SHOW GLOBAL STATUS")
+		results, err := db.QueryContext(ctx, "SHOW GLOBAL STATUS")
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			return err
 		}
 

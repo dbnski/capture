@@ -188,7 +188,7 @@ func main() {
 
     slog.Info("Connecting to database...")
     for {
-        queryCtx, queryCancel := context.WithTimeout(ctx, 1*time.Second)
+        queryCtx, queryCancel := context.WithTimeout(ctx, 1 * time.Second)
         err := db.PingContext(queryCtx)
         queryCancel()
 
