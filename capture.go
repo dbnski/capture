@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -84,7 +85,7 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 	})
 }
 
-func writeInSingleLineUnsafe(w *RotatingLogWriter, s string) {
+func writeInSingleLineUnsafe(w io.Writer, s string) {
 	b := unsafe.Slice(unsafe.StringData(s), len(s))
 
 	p := 0
