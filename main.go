@@ -6,6 +6,7 @@ import (
     "log/slog"
     "os"
     "os/signal"
+    "path/filepath"
     "sync"
     "syscall"
     "time"
@@ -19,14 +20,6 @@ var options struct {
     Hostname      string        `name:"hostname" 
                                  placeholder:"ADDRESS" 
                                  help:"Database address (required)"`
-    Socket        string        `name:"socket" 
-                                 placeholder:"PATH" 
-                                 default:"/var/run/mysqld/mysqld.sock" 
-                                 help:"Database unix socket"`
-    Port          string        `name:"port" 
-                                 placeholder:"PORT" 
-                                 default:"3306" 
-                                 help:"Database port"`
     Username      string        `name:"username" 
                                  placeholder:"USERNAME" 
                                  help:"Database user"`
@@ -34,11 +27,19 @@ var options struct {
                                  xor:"password" 
                                  placeholder:"PASSWORD" 
                                  help:"Database password"`
+    Port          string        `name:"port" 
+                                 placeholder:"PORT" 
+                                 default:"3306" 
+                                 help:"Database port"`
+    TLS           bool          `name:"tls" 
+                                 help:"Use TLS connection to database"`
+    Socket        string        `name:"socket" 
+                                 placeholder:"PATH" 
+                                 default:"/var/run/mysqld/mysqld.sock" 
+                                 help:"Database unix socket"`
     AskPass       bool          `name:"ask-pass" 
                                  xor:"password" 
                                  help:"Prompt for a password"`
-    TLS           bool          `name:"tls" 
-                                 help:"Use TLS connection to database"`
     DefaultsFile  string        `name:"defaults-file" 
                                  placeholder:"FILE" 
                                  help:"Default database options file"`
@@ -109,17 +110,24 @@ func main() {
     db.SetConnMaxLifetime(24 * time.Hour)
     db.SetMaxOpenConns(3)
 
-    if _, err := os.Stat(options.Path); err != nil {
-        if os.IsNotExist(err) {
-            if err := os.Mkdir(options.Path, 0750); err != nil {
-                slog.Error("Failed to create output directory", "path", options.Path, "error", err)
-                os.Exit(1)
-            }
-        } else {
-            slog.Error("Failed to check output directory", "path", options.Path, "error", err)
+    if stat, err := os.Stat(options.Path); err != nil {
+        slog.Error("Failed to use the output path", "path", options.Path, "error", err)
+        os.Exit(1)
+    } else if !stat.IsDir() {
+        slog.Error("Output path is not a directory", "path", options.Path)
+        os.Exit(1)
+    } else {
+        testFile := options.Path + "/.test"
+        if f, err := os.Create(testFile); err != nil {
+            slog.Error("Output path is not writable", "path", options.Path, "error", err)
             os.Exit(1)
+        } else {
+            f.Close()
+            os.Remove(testFile)
         }
     }
+    fullPath, _ := filepath.Abs(options.Path)
+    slog.Info("Output path", "path", fullPath)
 
     ctx, cancel := context.WithCancel(context.Background())
 
@@ -138,7 +146,6 @@ func main() {
         }
     }()
 
-    slog.Info("Connecting to database...")
     for {
         queryCtx, queryCancel := context.WithTimeout(ctx, 1 * time.Second)
         err := db.PingContext(queryCtx)
