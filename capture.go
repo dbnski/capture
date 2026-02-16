@@ -118,6 +118,7 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 
 		switch len(columns) {
 		case 8:
+			// nothing to do
 		case 10:
 			record[8] = new(uint64)     // RowsSent
 			record[9] = new(uint64)     // RowsExamined
@@ -150,6 +151,8 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 			}
 
 			switch len(record) {
+			case 8:
+				// nothing to do
 			case 10:
 				pl.RowsSent     = *record[8].(*uint64)
 				pl.RowsExamined = *record[9].(*uint64)
@@ -157,6 +160,8 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 				pl.TimeMs       = *record[8].(*uint64)
 				pl.RowsSent     = *record[9].(*uint64)
 				pl.RowsExamined = *record[10].(*uint64)
+			default:
+				return errors.New("Unexpected number of columns in processlist")
 			}
 
 			info := strings.Replace(pl.Info.String, "\n", " ", -1)
