@@ -56,6 +56,9 @@ var options struct {
                                  placeholder:"PATH" 
                                  default:"." 
                                  help:"Output directory"`
+    Version       bool          `name:"version" 
+                                 short:"v" 
+                                 help:"Print version information"`
 }
 
 var (
@@ -72,6 +75,11 @@ func main() {
             fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
         kong.UsageOnError(),
     )
+
+    if options.Version {
+        fmt.Println(Version)
+        os.Exit(0)
+    }
 
     slog.Info("Version", "version", Version, "build", Build, "commit", CommitHash)
 
