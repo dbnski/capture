@@ -15,7 +15,9 @@ import (
 	"unsafe"
 )
 
-func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, capture func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error) {
+func capture(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB, name string, captureFunc func(ctx context.Context, db *sql.DB, writer Writer) error) {
+	defer wg.Done()
+
 	writer := NewRotatingLogWriter(mu, name)
 	defer writer.Close()
 
@@ -35,7 +37,7 @@ func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, captu
 
 			fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
 			
-			if err := capture(ctx, db, writer); err != nil {
+			if err := captureFunc(ctx, db, writer); err != nil {
 				fmt.Fprintln(writer, "Capture error:", err.Error())
 				slog.Error("Failed to capture data", "type", name, "error", err)
 			}
@@ -47,10 +49,8 @@ func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, captu
 	}
 }
 
-func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
-	defer wg.Done()
-
-	capture(ctx, mu, db, "innodb-status", func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error {
+func captureInnodbStatus() func (ctx context.Context, db *sql.DB, writer Writer) error {
+	return func(ctx context.Context, db *sql.DB, writer Writer) error {
 		var (
 			engineType   string
 			engineName   string
@@ -82,7 +82,7 @@ func captureInnodbStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 		}
 
 		return nil
-	})
+	}
 }
 
 func writeInSingleLineUnsafe(w io.Writer, s string) {
@@ -101,10 +101,8 @@ func writeInSingleLineUnsafe(w io.Writer, s string) {
 	}
 }
 
-func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
-	defer wg.Done()
-
-	capture(ctx, mu, db, "processlist", func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error {
+func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) error {
+	return func(ctx context.Context, db *sql.DB, writer Writer) error {
 		type ProcessList struct {
 			Id           uint64
 			User         sql.NullString
@@ -216,13 +214,11 @@ func captureProcesslist(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex,
 		}
 
 		return nil
-	})
+	}
 }
 
-func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB) {
-	defer wg.Done()
-
-	capture(ctx, mu, db, "global-status", func(ctx context.Context, db *sql.DB, writer *RotatingLogWriter) error {
+func captureGlobalStatus() func(ctx context.Context, db *sql.DB, writer Writer) error {
+	return func(ctx context.Context, db *sql.DB, writer Writer) error {
 		type Variable struct {
 			Name  sql.NullString
 			Value sql.NullString
@@ -258,5 +254,5 @@ func captureGlobalStatus(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex
 		}
 
 		return nil
-	})
+	}
 }

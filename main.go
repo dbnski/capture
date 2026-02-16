@@ -201,9 +201,9 @@ func main() {
     var mu sync.Mutex
 
     wg.Add(3)
-    go captureInnodbStatus(ctx, &wg, &mu, db)
-    go captureProcesslist(ctx, &wg, &mu, db)
-    go captureGlobalStatus(ctx, &wg, &mu, db)
+    go capture(ctx, &wg, &mu, db, "processlist",   captureProcesslist())
+    go capture(ctx, &wg, &mu, db, "innodb-status", captureInnodbStatus())
+    go capture(ctx, &wg, &mu, db, "global-status", captureGlobalStatus())
 
     wg.Wait()
 

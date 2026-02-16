@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+type Writer interface {
+	Flush() error
+	Write(p []byte) (n int, err error)
+}
+
 type RotatingLogWriter struct {
 	fd           *os.File
 	gz           *gzip.Writer
