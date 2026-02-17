@@ -75,7 +75,12 @@ func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, fn Ca
 			fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
 
 			if err := fn(ctx, db, writer); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
+
 				fmt.Fprintln(writer, "Capture error:", err.Error())
+
 				if !shouldRetry(err) {
 					slog.Error("Fatal capture error", "type", name, "error", err)
 					return err
@@ -100,16 +105,13 @@ func captureInnodbStatus() func (ctx context.Context, db *sql.DB, writer Writer)
 
 		results, err := db.QueryContext(ctx, "SHOW ENGINE INNODB STATUS")
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return err
 		}
 
 		now := time.Now()
 
 		for results.Next() {
-			err = results.Scan(&engineType, &engineName, &engineStatus)
+			err := results.Scan(&engineType, &engineName, &engineStatus)
 			if err != nil {
 				return err
 			}
@@ -160,9 +162,6 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 
 		results, err := db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return  err
 		}
 		columns, err := results.Columns()
@@ -197,10 +196,9 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 		now := time.Now()
 
 		for results.Next() {
-			err = results.Scan(record...)
+			err := results.Scan(record...)
 			if err != nil {
-				slog.Error("Failed to scan processlist", "error", err)
-				break
+				return err
 			}
 
 			pl := &ProcessList{
@@ -272,16 +270,13 @@ func captureGlobalStatus() func(ctx context.Context, db *sql.DB, writer Writer) 
 
 		results, err := db.QueryContext(ctx, "SHOW GLOBAL STATUS")
 		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
 			return err
 		}
 
 		now := time.Now()
 
 		for results.Next() {
-			err = results.Scan(record...)
+			err := results.Scan(record...)
 			if err != nil {
 				return err
 			}
