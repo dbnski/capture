@@ -5,19 +5,55 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/go-sql-driver/mysql"
 )
 
-func capture(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB, name string, captureFunc func(ctx context.Context, db *sql.DB, writer Writer) error) {
-	defer wg.Done()
+type CaptureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
 
+func shouldRetry(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	if errors.Is(err, driver.ErrBadConn) {
+		return true
+	}
+
+	if errors.Is(err, mysql.ErrInvalidConn) {
+		return true
+	}
+
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		if mysqlErr.Number == 1040 || mysqlErr.Number == 1053 || mysqlErr.Number == 1105 {
+			return true
+		}
+		return false
+	}
+
+	return false
+}
+
+func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, fn CaptureFunc) error {
 	writer := NewRotatingLogWriter(mu, name)
 	defer writer.Close()
 
@@ -26,7 +62,8 @@ func capture(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB
 	for {
 		select {
 		case <- ctx.Done():
-			return
+			slog.Info("Capture stopped", "type", name)
+			return nil
 		case now := <- timer.C:
 			timer.Reset(options.Interval)
 
@@ -36,13 +73,17 @@ func capture(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, db *sql.DB
 			}
 
 			fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
-			
-			if err := captureFunc(ctx, db, writer); err != nil {
+
+			if err := fn(ctx, db, writer); err != nil {
 				fmt.Fprintln(writer, "Capture error:", err.Error())
-				slog.Error("Failed to capture data", "type", name, "error", err)
+				if !shouldRetry(err) {
+					slog.Error("Fatal capture error", "type", name, "error", err)
+					return err
+				}
+				slog.Error("Capture error", "type", name, "error", err)
 			}
 
-			fmt.Fprintf(writer, "---------+ ---------------------------------------------------------------------\n\n")
+			fmt.Fprintf(writer, "---------+ --------------------------------------------------------------------------\n\n")
 
 			writer.Flush()
 		}

@@ -91,6 +91,9 @@ func main() {
     config := &mysql.Config{
             User:                 options.Username,
             Passwd:               options.Password,
+            Timeout:              5 * time.Second,
+            ReadTimeout:          5 * time.Second,
+            WriteTimeout:         5 * time.Second,
             AllowNativePasswords: true,
     }
 
@@ -169,43 +172,37 @@ func main() {
         }
     }()
 
-    for {
-        queryCtx, queryCancel := context.WithTimeout(ctx, 1 * time.Second)
-        err := db.PingContext(queryCtx)
-        queryCancel()
-
-        if err == nil {
-            slog.Info("Successfully connected to MySQL")
-            break
-        } else if ctx.Err() != nil {
-            slog.Info("Shutting down")
-            os.Exit(0)
-        } else {
-            slog.Error("Failed to connect to database, will retry", "error", err)
-        }
-
-        timer := time.NewTimer(1 * time.Second)
-        select {
-        case <- ctx.Done():
-            timer.Stop()
-            slog.Info("Shutting down")
-            os.Exit(0)
-        case <- timer.C:
-            continue
-        }
+    if err := db.Ping(); err != nil {
+        slog.Error("Failed to connect to database", "error", err)
+        os.Exit(1)
     }
 
     slog.Info("Capturing state information", "interval", options.Interval)
 
-    var wg sync.WaitGroup
+    type captureTask struct {
+        name string
+        fn   CaptureFunc
+    }
     var mu sync.Mutex
 
-    wg.Add(3)
-    go capture(ctx, &wg, &mu, db, "processlist",   captureProcesslist())
-    go capture(ctx, &wg, &mu, db, "innodb-status", captureInnodbStatus())
-    go capture(ctx, &wg, &mu, db, "global-status", captureGlobalStatus())
+    tasks := []captureTask{
+        {"processlist",   captureProcesslist()},
+        {"innodb-status", captureInnodbStatus()},
+        {"global-status", captureGlobalStatus()},
+    }
 
-    wg.Wait()
+    errCh := make(chan error, len(tasks))
+    for _, task := range tasks {
+        go func(t captureTask) {
+            errCh <- capture(ctx, &mu, db, t.name, t.fn)
+        }(task)
+    }
+
+    for range tasks {
+        if err := <-errCh; err != nil {
+            cancel()
+        }
+    }
 
     slog.Info("Shutting down")
 }
