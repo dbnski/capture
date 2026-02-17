@@ -17,13 +17,15 @@ type Writer interface {
 type RotatingLogWriter struct {
 	fd           *os.File
 	gz           *gzip.Writer
+	basedir		 string
 	prefix       string
 	lastRotation time.Time
 }
 
-func NewRotatingLogWriter(prefix string) *RotatingLogWriter {
+func NewRotatingLogWriter(basedir, prefix string) *RotatingLogWriter {
 	return &RotatingLogWriter{
-		prefix: prefix,
+		basedir: basedir,
+		prefix:  prefix,
 	}
 }
 
@@ -35,10 +37,10 @@ func ensurePath(logPath string) error {
 }
 
 func (w *RotatingLogWriter) EnsureRotated() error {
-	now  := time.Now()
+	now := time.Now().Truncate(time.Hour)
 	then := w.lastRotation
 
-	if then != (time.Time{}) && then.Truncate(time.Hour).Equal(now.Truncate(time.Hour)) {
+	if then != (time.Time{}) && then.Equal(now) {
 		return nil
 	}
 
@@ -46,12 +48,12 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 		return err
 	}
 
-	logPath := filepath.Join(options.Path, now.Format("20060102"))
+	logPath := filepath.Join(w.basedir, now.Format("20060102"))
 	if err := ensurePath(logPath); err != nil {
 		return err
 	}
 
-	filename := filepath.Join(logPath, w.prefix + "." + now.Truncate(time.Hour).Format("200601021504") + ".gz")
+	filename := filepath.Join(logPath, w.prefix + "." + now.Format("200601021504") + ".gz")
 	fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 	if err != nil {
 		return err

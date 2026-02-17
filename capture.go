@@ -53,7 +53,7 @@ func shouldRetry(err error) bool {
 }
 
 func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error {
-	writer := NewRotatingLogWriter(name)
+	writer := NewRotatingLogWriter(options.Path, name)
 	defer writer.Close()
 
 	timer := time.NewTimer(0)
