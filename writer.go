@@ -49,7 +49,7 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 	now  := time.Now()
 	then := w.lastRotation
 
-	if then != (time.Time{}) && then.Hour() == now.Hour() {
+	if then != (time.Time{}) && then.Truncate(time.Hour).Equal(now.Truncate(time.Hour)) {
 		return nil
 	}
 
