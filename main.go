@@ -8,11 +8,13 @@ import (
     "os"
     "os/signal"
     "path/filepath"
+    "strings"
     "syscall"
     "time"
 
     "github.com/alecthomas/kong"
     "github.com/go-sql-driver/mysql"
+    "github.com/samber/lo"
     "golang.org/x/term"
 )
 
@@ -55,6 +57,11 @@ var options struct {
                                  placeholder:"PATH" 
                                  default:"." 
                                  help:"Output directory"`
+    Tasks         []string      `name:"tasks" 
+                                 placeholder:"NAME" 
+                                 enum:"${tasks}" 
+                                 sep:"," 
+                                 help:"Capture tasks to run: ${tasks} (default: all)"`
     Version       bool          `name:"version" 
                                  short:"v" 
                                  help:"Print version information"`
@@ -73,6 +80,9 @@ func main() {
         kong.Description(
             fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
         kong.UsageOnError(),
+        kong.Vars{
+            "tasks": strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
+        },
     )
 
     if options.Version {
@@ -87,106 +97,34 @@ func main() {
         os.Exit(1)
     }
 
-    config := &mysql.Config{
-            User:                 options.Username,
-            Passwd:               options.Password,
-            Timeout:              5 * time.Second,
-            ReadTimeout:          5 * time.Second,
-            WriteTimeout:         5 * time.Second,
-            AllowNativePasswords: true,
+    config, err := buildMySQLConfig()
+    if err != nil {
+        slog.Error("Failed to load defaults file", "file", options.DefaultsFile, "error", err)
+        os.Exit(1)
     }
 
-    if options.Hostname == "" || options.Hostname == "localhost"{
-        config.Net  = "unix"
-        config.Addr = options.Socket
-    } else {
-        config.Net  = "tcp"
-        config.Addr = options.Hostname + ":" + options.Port
+    if err := validatePathIsWriteable(options.Path); err != nil {
+        slog.Error("Invalid output path", "path", options.Path, "error", err)
+        os.Exit(1)
     }
+    fullPath, _ := filepath.Abs(options.Path)
+    slog.Info("Output path", "path", fullPath)
 
-    if options.TLS {
-        config.TLSConfig = "skip-verify"
-    }
-
-    if options.DefaultsFile != "" {
-        if err := loadConfigFile(config, options.DefaultsFile, options.DefaultsGroup); err != nil {
-            slog.Error("Failed to load defaults file", "file", options.DefaultsFile, "error", err)
-            os.Exit(1)
-        }
-    }
-
-    if options.AskPass {
-        slog.Info("Password: ")
-        passwd, err := term.ReadPassword(int(syscall.Stdin))
-        if err != nil {
-            slog.Error("Failed to read password", "error", err)
-            os.Exit(1)
-        }
-        config.Passwd = string(passwd)
-    }
-
-    db, err := sql.Open("mysql", config.FormatDSN())
+    db, err := getDatabase(config)
     if err != nil {
         slog.Error("Failed to open database connection", "error", err)
         os.Exit(1)
     }
     defer db.Close()
 
-    db.SetConnMaxLifetime(24 * time.Hour)
-    db.SetMaxOpenConns(3)
-
-    if stat, err := os.Stat(options.Path); err != nil {
-        slog.Error("Failed to use the output path", "path", options.Path, "error", err)
-        os.Exit(1)
-    } else if !stat.IsDir() {
-        slog.Error("Output path is not a directory", "path", options.Path)
-        os.Exit(1)
-    } else {
-        testFile := options.Path + "/.test"
-        if f, err := os.Create(testFile); err != nil {
-            slog.Error("Output path is not writable", "path", options.Path, "error", err)
-            os.Exit(1)
-        } else {
-            f.Close()
-            os.Remove(testFile)
-        }
-    }
-    fullPath, _ := filepath.Abs(options.Path)
-    slog.Info("Output path", "path", fullPath)
-
-    ctx, cancel := context.WithCancel(context.Background())
-
-    signals := make(chan os.Signal, 1)
-    signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
-    defer func() {
-        signal.Stop(signals)
-        cancel()
-    }()
-
-    go func() {
-        select {
-        case <- signals:
-            cancel()
-        case <- ctx.Done():
-        }
-    }()
-
-    if err := db.Ping(); err != nil {
-        slog.Error("Failed to connect to database", "error", err)
-        os.Exit(1)
-    }
+    ctx, cancel := getContext(context.Background())
+    defer cancel()
 
     slog.Info("Capturing state information", "interval", options.Interval)
 
-    type captureTask struct {
-        name string
-        fn   CaptureFunc
-    }
-    tasks := []captureTask{
-        {"processlist",   captureProcesslist()},
-        {"innodb-status", captureInnodbStatus()},
-        {"global-status", captureGlobalStatus()},
-    }
+    tasks := lo.Filter(allTasks, func(t captureTask, _ int) bool {
+        return len(options.Tasks) == 0 || lo.Contains(options.Tasks, t.name)
+    })
 
     errCh := make(chan error, len(tasks))
     for _, task := range tasks {
@@ -202,4 +140,97 @@ func main() {
     }
 
     slog.Info("Shutting down")
+}
+
+func buildMySQLConfig() (*mysql.Config, error) {
+    config := &mysql.Config{
+        User:                 options.Username,
+        Passwd:               options.Password,
+        Timeout:              5 * time.Second,
+        ReadTimeout:          5 * time.Second,
+        WriteTimeout:         5 * time.Second,
+        AllowNativePasswords: true,
+    }
+
+    if options.Hostname == "" || options.Hostname == "localhost" {
+        config.Net  = "unix"
+        config.Addr = options.Socket
+    } else {
+        config.Net  = "tcp"
+        config.Addr = options.Hostname + ":" + options.Port
+    }
+
+    if options.TLS {
+        config.TLSConfig = "skip-verify"
+    }
+
+    if options.DefaultsFile != "" {
+        if err := loadConfigFile(config, options.DefaultsFile, options.DefaultsGroup); err != nil {
+            return nil, err
+        }
+    }
+
+    if options.AskPass {
+        slog.Info("Password: ")
+        passwd, err := term.ReadPassword(int(syscall.Stdin))
+        if err != nil {
+            return nil, fmt.Errorf("failed to read password: %w", err)
+        }
+        config.Passwd = string(passwd)
+    }
+
+    return config, nil
+}
+
+func getDatabase(config *mysql.Config) (*sql.DB, error) {
+    db, err := sql.Open("mysql", config.FormatDSN())
+    if err != nil {
+        return nil, err
+    }
+    db.SetConnMaxLifetime(24 * time.Hour)
+    db.SetMaxOpenConns(3)
+
+    if err := db.Ping(); err != nil {
+        return nil, err
+    }
+
+    return db, nil
+}
+
+func getContext(ctx context.Context) (context.Context, context.CancelFunc) {
+    ctx, cancel := context.WithCancel(ctx)
+
+    signals := make(chan os.Signal, 1)
+    signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT)
+
+    go func() {
+        select {
+        case <-signals:
+            cancel()
+        case <-ctx.Done():
+        }
+    }()
+
+    return ctx, func() {
+        signal.Stop(signals)
+        cancel()
+    }
+}
+
+func validatePathIsWriteable(path string) error {
+    stat, err := os.Stat(path)
+    if err != nil {
+        return err
+    }
+    if !stat.IsDir() {
+        return fmt.Errorf("not a directory")
+    }
+    testFile := path + "/.test"
+    f, err := os.Create(testFile)
+    if err != nil {
+        return fmt.Errorf("not writable: %w", err)
+    }
+    f.Close()
+    os.Remove(testFile)
+    return nil
 }

@@ -18,7 +18,18 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
+type captureTask struct {
+    name string
+    fn   CaptureFunc
+}
+
 type CaptureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
+
+var allTasks = []captureTask{
+    {"processlist", captureProcesslist()},
+    {"innodb",      captureInnodb()},
+    {"status",      captureStatus()},
+}
 
 func shouldRetry(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -94,7 +105,7 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
 	}
 }
 
-func captureInnodbStatus() func (ctx context.Context, db *sql.DB, writer Writer) error {
+func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error {
 	return func(ctx context.Context, db *sql.DB, writer Writer) error {
 		var (
 			engineType   string
@@ -255,7 +266,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 	}
 }
 
-func captureGlobalStatus() func(ctx context.Context, db *sql.DB, writer Writer) error {
+func captureStatus() func(ctx context.Context, db *sql.DB, writer Writer) error {
 	return func(ctx context.Context, db *sql.DB, writer Writer) error {
 		type Variable struct {
 			Name  sql.NullString

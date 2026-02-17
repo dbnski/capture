@@ -11,5 +11,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/samber/lo v1.52.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 )
