@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net"
 	"strings"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -53,8 +52,8 @@ func shouldRetry(err error) bool {
 	return false
 }
 
-func capture(ctx context.Context, mu *sync.Mutex, db *sql.DB, name string, fn CaptureFunc) error {
-	writer := NewRotatingLogWriter(mu, name)
+func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error {
+	writer := NewRotatingLogWriter(name)
 	defer writer.Close()
 
 	timer := time.NewTimer(0)

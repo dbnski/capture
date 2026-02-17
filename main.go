@@ -8,7 +8,6 @@ import (
     "os"
     "os/signal"
     "path/filepath"
-    "sync"
     "syscall"
     "time"
 
@@ -183,8 +182,6 @@ func main() {
         name string
         fn   CaptureFunc
     }
-    var mu sync.Mutex
-
     tasks := []captureTask{
         {"processlist",   captureProcesslist()},
         {"innodb-status", captureInnodbStatus()},
@@ -194,7 +191,7 @@ func main() {
     errCh := make(chan error, len(tasks))
     for _, task := range tasks {
         go func(t captureTask) {
-            errCh <- capture(ctx, &mu, db, t.name, t.fn)
+            errCh <- capture(ctx, db, t.name, t.fn)
         }(task)
     }
 

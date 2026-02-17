@@ -2,10 +2,10 @@ package main
 
 import (
 	"compress/gzip"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -19,28 +19,17 @@ type RotatingLogWriter struct {
 	gz           *gzip.Writer
 	prefix       string
 	lastRotation time.Time
-	mu           *sync.Mutex
 }
 
-func NewRotatingLogWriter(mu *sync.Mutex, prefix string) *RotatingLogWriter {
+func NewRotatingLogWriter(prefix string) *RotatingLogWriter {
 	return &RotatingLogWriter{
-		mu:     mu,
 		prefix: prefix,
 	}
 }
 
-func (w *RotatingLogWriter) ensurePath(logPath string) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if _, err := os.Stat(logPath); err != nil {
-		if os.IsNotExist(err) {
-			if err := os.Mkdir(logPath, 0750); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+func ensurePath(logPath string) error {
+	if err := os.Mkdir(logPath, 0750); err != nil && !os.IsExist(err) {
+		return err
 	}
 	return nil
 }
@@ -53,23 +42,16 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 		return nil
 	}
 
-	if w.fd != nil {
-		if err := w.gz.Close(); err != nil {
-			return err
-		}
-		if err := w.fd.Close(); err != nil {
-			return err
-		}
-		w.fd = nil
-		w.gz = nil
-	}
-
-	logPath := filepath.Join(options.Path, now.Format("20060102"))
-	if err := w.ensurePath(logPath); err != nil {
+	if err := w.Close(); err != nil {
 		return err
 	}
 
-	filename := filepath.Join(logPath, w.prefix + "." + now.Format("20060102T1500") + ".gz")
+	logPath := filepath.Join(options.Path, now.Format("20060102"))
+	if err := ensurePath(logPath); err != nil {
+		return err
+	}
+
+	filename := filepath.Join(logPath, w.prefix + "." + now.Truncate(time.Hour).Format("200601021504") + ".gz")
 	fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 	if err != nil {
 		return err
@@ -93,13 +75,14 @@ func (w *RotatingLogWriter) Flush() error {
 }
 
 func (w *RotatingLogWriter) Close() error {
+	var gzErr, fdErr error
 	if w.gz != nil {
-		if err := w.gz.Close(); err != nil {
-			return err
-		}
+		gzErr = w.gz.Close()
+		w.gz = nil
 	}
 	if w.fd != nil {
-		return w.fd.Close()
+		fdErr = w.fd.Close()
+		w.fd = nil
 	}
-	return nil
+	return errors.Join(gzErr, fdErr)
 }
