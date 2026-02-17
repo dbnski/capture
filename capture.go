@@ -152,12 +152,12 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 			Host         sql.NullString
 			Db           sql.NullString
 			Command      sql.NullString
-			Time         uint32
+			Time         int32
 			State        sql.NullString
 			Info         sql.NullString
-			TimeMs       uint64
-			RowsSent     uint64
-			RowsExamined uint64
+			TimeMs       int64
+			RowsSent     int64
+			RowsExamined int64
 		}
 
 		results, err := db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
