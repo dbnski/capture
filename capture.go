@@ -175,7 +175,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 		record[2] = new(sql.NullString) // Host
 		record[3] = new(sql.NullString) // Db
 		record[4] = new(sql.NullString) // Command
-		record[5] = new(uint32)         // Time
+		record[5] = new(int32)          // Time
 		record[6] = new(sql.NullString) // State
 		record[7] = new(sql.NullString) // Info
 
@@ -183,12 +183,12 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 		case 8:
 			// nothing to do
 		case 10:
-			record[8] = new(uint64)     // RowsSent
-			record[9] = new(uint64)     // RowsExamined
+			record[8] = new(int64)     // RowsSent
+			record[9] = new(int64)     // RowsExamined
 		case 11:
-			record[8] = new(uint64)     // TimeMs
-			record[9] = new(uint64)     // RowsSent
-			record[10] = new(uint64)    // RowsExamined
+			record[8] = new(int64)     // TimeMs
+			record[9] = new(int64)     // RowsSent
+			record[10] = new(int64)    // RowsExamined
 		default:
 			return errors.New("Unexpected number of columns in processlist")
 		}
@@ -207,7 +207,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 				Host:    *record[2].(*sql.NullString),
 				Db:      *record[3].(*sql.NullString),
 				Command: *record[4].(*sql.NullString),
-				Time:    *record[5].(*uint32),
+				Time:    *record[5].(*int32),
 				State:   *record[6].(*sql.NullString),
 				Info:    *record[7].(*sql.NullString),
 			}
@@ -216,12 +216,12 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 			case 8:
 				// nothing to do
 			case 10:
-				pl.RowsSent     = *record[8].(*uint64)
-				pl.RowsExamined = *record[9].(*uint64)
+				pl.RowsSent     = *record[8].(*int64)
+				pl.RowsExamined = *record[9].(*int64)
 			case 11:
-				pl.TimeMs       = *record[8].(*uint64)
-				pl.RowsSent     = *record[9].(*uint64)
-				pl.RowsExamined = *record[10].(*uint64)
+				pl.TimeMs       = *record[8].(*int64)
+				pl.RowsSent     = *record[9].(*int64)
+				pl.RowsExamined = *record[10].(*int64)
 			default:
 				return errors.New("Unexpected number of columns in processlist")
 			}
