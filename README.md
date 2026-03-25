@@ -18,6 +18,24 @@ Your database user needs the `PROCESS` and `SUPER` privileges:
 GRANT PROCESS, SUPER ON *.* TO 'monitor'@'localhost';
 ```
 
+## Building
+
+```bash
+make
+```
+
+Two environment variables can be overridden:
+
+| Variable | Default | Description |
+|---|---|---|
+| `GOARCH` | host arch | Target architecture for cross-compilation (e.g. `amd64`, `arm64`) |
+| `CGO_ENABLED` | `1` | Set to `0` to produce a fully static binary |
+
+Example:
+```bash
+CGO_ENABLED=0 GOARCH=arm64 make
+```
+
 ## Quick Start
 
 Run:
