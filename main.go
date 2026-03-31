@@ -72,8 +72,8 @@ var options struct {
     Path          string        `name:"path" 
                                  group:"Capture" 
                                  placeholder:"PATH" 
-                                 default:"." 
-                                 help:"Output directory"`
+                                 default:"${path}" 
+                                 help:"Output directory (default: ${path})"`
     Version       bool          `name:"version" 
                                  short:"v" 
                                  help:"Print version information"`
@@ -93,6 +93,7 @@ func main() {
             fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
         kong.UsageOnError(),
         kong.Vars{
+            "path":   ".",
             "port":   "3306",
             "tasks":  strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
             "socket": "/var/run/mysqld/mysqld.sock",
