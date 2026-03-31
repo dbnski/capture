@@ -20,48 +20,60 @@ import (
 
 var options struct {
     Hostname      string        `name:"hostname" 
-                                 placeholder:"ADDRESS" 
-                                 help:"Database address (required)"`
+                                 group:"Database" 
+                                 placeholder:"HOSTNAME" 
+                                 default:"localhost" 
+                                 help:"Database address"`
     Username      string        `name:"username" 
+                                 group:"Database" 
                                  placeholder:"USERNAME" 
                                  help:"Database user"`
     Password      string        `name:"password" 
+                                 group:"Database" 
                                  xor:"password" 
                                  placeholder:"PASSWORD" 
                                  help:"Database password"`
     Port          string        `name:"port" 
+                                 group:"Database" 
                                  placeholder:"PORT" 
-                                 default:"3306" 
-                                 help:"Database port"`
-    TLS           bool          `name:"tls" 
-                                 help:"Use TLS connection to database"`
+                                 default:${port} 
+                                 help:"Database port (default: ${port})"`
     Socket        string        `name:"socket" 
-                                 placeholder:"PATH" 
-                                 default:"/var/run/mysqld/mysqld.sock" 
-                                 help:"Database unix socket"`
+                                 group:"Database" 
+                                 placeholder:"SOCKET" 
+                                 default:"${socket}" 
+                                 help:"Database unix socket (default: ${socket})"`
     AskPass       bool          `name:"ask-pass" 
+                                 group:"Database" 
                                  xor:"password" 
                                  help:"Prompt for a password"`
     DefaultsFile  string        `name:"defaults-file" 
+                                 group:"Database" 
                                  placeholder:"FILE" 
                                  help:"Default database options file"`
     DefaultsGroup string        `name:"defaults-group" 
+                                 group:"Database" 
                                  placeholder:"NAME" 
                                  default:"client" 
                                  help:"Defaults file section name"`
-    Interval      time.Duration `name:"interval" 
-                                 placeholder:"DURATION" 
-                                 default:"5s" 
-                                 help:"Interval for collecting data"`
-    Path          string        `name:"path" 
-                                 placeholder:"PATH" 
-                                 default:"." 
-                                 help:"Output directory"`
+    TLS           bool          `name:"tls" 
+                                 group:"Database" 
+                                 help:"Use TLS connection to database"`
     Tasks         []string      `name:"tasks" 
+                                 group:"Capture" 
                                  placeholder:"NAME" 
                                  enum:"${tasks}" 
                                  sep:"," 
-                                 help:"Capture tasks to run: ${tasks} (default: all)"`
+                                 help:"Capture tasks to enable: ${tasks} (default: all)"`
+    Interval      time.Duration `name:"interval" 
+                                 group:"Capture" 
+                                 default:"5s" 
+                                 help:"Interval for collecting data"`
+    Path          string        `name:"path" 
+                                 group:"Capture" 
+                                 placeholder:"PATH" 
+                                 default:"." 
+                                 help:"Output directory"`
     Version       bool          `name:"version" 
                                  short:"v" 
                                  help:"Print version information"`
@@ -81,7 +93,9 @@ func main() {
             fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
         kong.UsageOnError(),
         kong.Vars{
-            "tasks": strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
+            "port":   "3306",
+            "tasks":  strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
+            "socket": "/var/run/mysqld/mysqld.sock",
         },
     )
 
