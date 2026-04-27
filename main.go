@@ -180,7 +180,9 @@ func buildMySQLConfig() (*mysql.Config, error) {
     }
 
     if options.DefaultsFile != "" {
-        if err := loadConfigFile(config, options.DefaultsFile, options.DefaultsGroup); err != nil {
+        var err error
+        config, err = loadConfigFile(config, options.DefaultsFile, options.DefaultsGroup)
+        if err != nil {
             return nil, err
         }
     }

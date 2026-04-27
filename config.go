@@ -8,7 +8,10 @@ import (
     "github.com/go-sql-driver/mysql"
 )
 
-func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) error {
+func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) (*mysql.Config, error) {
+    if c == nil {
+        c = mysql.NewConfig()
+    }
     options := ini.LoadOptions{
         AllowBooleanKeys: true,
         IgnoreContinuation: true,
@@ -17,7 +20,7 @@ func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) 
 
     params, err := ini.LoadSources(options, defaultsFile)
     if err != nil {
-        return err
+        return nil, err
     }
 
     for _, s := range params.Sections() {
@@ -44,8 +47,8 @@ func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) 
             c.Addr = addr[0] + ":" + s.Key("port").String()
         }
 
-        return nil
+        return c, nil
     }
 
-    return fmt.Errorf("Client section not found")
+    return nil, fmt.Errorf("Client section not found")
 }

@@ -90,7 +90,7 @@ user = testuser
 			}
 
 			config := &mysql.Config{}
-			err = loadConfigFile(config, tmpfile.Name(), tt.section)
+			config, err = loadConfigFile(config, tmpfile.Name(), tt.section)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("loadConfigFile() error = %v, wantErr %v", err, tt.wantErr)
@@ -122,7 +122,7 @@ user = testuser
 
 func TestLoadConfigFileNotFound(t *testing.T) {
 	config := &mysql.Config{}
-	err := loadConfigFile(config, "/nonexistent/file.cnf", "client")
+	_, err := loadConfigFile(config, "/nonexistent/file.cnf", "client")
 	if err == nil {
 		t.Error("Expected error for nonexistent file, got nil")
 	}
@@ -150,7 +150,7 @@ user = newuser
 		Passwd: "existingpass",
 	}
 
-	err = loadConfigFile(config, tmpfile.Name(), "client")
+	config, err = loadConfigFile(config, tmpfile.Name(), "client")
 	if err != nil {
 		t.Fatal(err)
 	}
