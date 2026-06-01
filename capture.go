@@ -82,7 +82,7 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
                 continue
             }
 
-            fmt.Fprintf(writer, "---------+ TS %s ---------------------------------------------\n", now.Format(time.RFC3339))
+            fmt.Fprintf(writer, "---------+ TS %s --------------------------------------------------\n", now.Format(time.RFC3339))
 
             if err := fn(ctx, db, writer); err != nil {
                 if errors.Is(err, context.Canceled) {

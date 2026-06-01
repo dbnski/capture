@@ -188,8 +188,9 @@ func buildMySQLConfig() (*mysql.Config, error) {
     }
 
     if options.AskPass {
-        slog.Info("Password: ")
+        fmt.Print("Password: ")
         passwd, err := term.ReadPassword(int(syscall.Stdin))
+        fmt.Println()
         if err != nil {
             return nil, fmt.Errorf("failed to read password: %w", err)
         }
