@@ -162,7 +162,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 			Host         sql.NullString
 			Db           sql.NullString
 			Command      sql.NullString
-			Time         int32
+			Time         sql.NullInt32
 			State        sql.NullString
 			Info         sql.NullString
 			TimeMs       int64
@@ -185,7 +185,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 		record[2] = new(sql.NullString) // Host
 		record[3] = new(sql.NullString) // Db
 		record[4] = new(sql.NullString) // Command
-		record[5] = new(int32)          // Time
+		record[5] = new(sql.NullInt32)  // Time
 		record[6] = new(sql.NullString) // State
 		record[7] = new(sql.NullString) // Info
 
@@ -217,7 +217,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 				Host:    *record[2].(*sql.NullString),
 				Db:      *record[3].(*sql.NullString),
 				Command: *record[4].(*sql.NullString),
-				Time:    *record[5].(*int32),
+				Time:    *record[5].(*sql.NullInt32),
 				State:   *record[6].(*sql.NullString),
 				Info:    *record[7].(*sql.NullString),
 			}
@@ -242,19 +242,19 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
 			case 8:
 				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.State.String)
+					pl.Command.String, pl.Time.Int32, pl.State.String)
 				writeInSingleLineUnsafe(writer, pl.Info.String)
 				fmt.Fprintln(writer)
 			case 10:
 				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.State.String, pl.RowsSent, pl.RowsExamined)
+					pl.Command.String, pl.Time.Int32, pl.State.String, pl.RowsSent, pl.RowsExamined)
 				writeInSingleLineUnsafe(writer, pl.Info.String)
 				fmt.Fprintln(writer)
 			case 11:
 				fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t",
 					timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-					pl.Command.String, pl.Time, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined)
+					pl.Command.String, pl.Time.Int32, pl.TimeMs, pl.State.String, pl.RowsSent, pl.RowsExamined)
 				writeInSingleLineUnsafe(writer, pl.Info.String)
 				fmt.Fprintln(writer)
 			default:
