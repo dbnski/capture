@@ -148,13 +148,16 @@ func main() {
         }(task)
     }
 
+    errCode := 0
     for range tasks {
         if err := <-errCh; err != nil {
+            errCode = 1
             cancel()
         }
     }
 
     slog.Info("Shutting down")
+    os.Exit(errCode)
 }
 
 func buildMySQLConfig() (*mysql.Config, error) {
