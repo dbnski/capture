@@ -13,10 +13,12 @@ Everything gets written to compressed, hourly-rotated log files organized by dat
 
 ## Database Permissions
 
-Your database user needs the `PROCESS` and `SUPER` privileges:
+Your database user needs the `PROCESS` privilege:
 ```sql
-GRANT PROCESS, SUPER ON *.* TO 'monitor'@'localhost';
+GRANT PROCESS ON *.* TO 'monitor'@'localhost';
 ```
+
+`PROCESS` is required to see other users' threads in the process list and to run `SHOW ENGINE <engine> STATUS` commands.
 
 ## Building
 
