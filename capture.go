@@ -100,7 +100,9 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
 
             fmt.Fprintf(writer, "---------+ --------------------------------------------------------------------------\n\n")
 
-            writer.Flush()
+            if err := writer.Flush(); err != nil {
+                slog.Error("Failed to flush capture output", "type", name, "error", err)
+            }
         }
     }
 }
