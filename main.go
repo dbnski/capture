@@ -86,6 +86,8 @@ var (
     BuildTime  = "(recently)"
 )
 
+const minInterval = 100 * time.Millisecond
+
 func main() {
     kong.Parse(
         &options,
@@ -109,6 +111,11 @@ func main() {
 
     if options.Hostname == "" {
         slog.Error("--hostname is required")
+        os.Exit(1)
+    }
+
+    if options.Interval < minInterval {
+        slog.Error("--interval is too small", "interval", options.Interval, "minimum", minInterval)
         os.Exit(1)
     }
 
