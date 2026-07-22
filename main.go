@@ -246,12 +246,16 @@ func validatePathIsWriteable(path string) error {
     if !stat.IsDir() {
         return fmt.Errorf("not a directory")
     }
-    testFile := path + "/.test"
-    f, err := os.Create(testFile)
+    f, err := os.CreateTemp(path, ".capture-write-test-*")
     if err != nil {
         return fmt.Errorf("not writable: %w", err)
     }
+
+    testFile := f.Name()
     f.Close()
-    os.Remove(testFile)
+
+    if err := os.Remove(testFile); err != nil {
+        return fmt.Errorf("could not remove test file %s: %w", testFile, err)
+    }
     return nil
 }
