@@ -117,6 +117,7 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
         if err != nil {
             return err
         }
+        defer results.Close()
 
         now := time.Now()
 
@@ -134,7 +135,7 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
             }
         }
 
-        return nil
+        return results.Err()
     }
 }
 
@@ -174,6 +175,8 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
         if err != nil {
             return  err
         }
+        defer results.Close()
+
         columns, err := results.Columns()
         if err != nil {
             return err
@@ -265,7 +268,7 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
             }
         }
 
-        return nil
+        return results.Err()
     }
 }
 
@@ -285,6 +288,7 @@ func captureStatus() func(ctx context.Context, db *sql.DB, writer Writer) error 
         if err != nil {
             return err
         }
+        defer results.Close()
 
         now := time.Now()
 
@@ -302,6 +306,6 @@ func captureStatus() func(ctx context.Context, db *sql.DB, writer Writer) error 
             fmt.Fprintf(writer, "%s | %s = %s\n", now.Format("15:04:05"), v.Name.String, v.Value.String)
         }
 
-        return nil
+        return results.Err()
     }
 }
