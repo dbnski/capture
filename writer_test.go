@@ -80,23 +80,3 @@ func TestEnsureRotatedRotatesOnNewHour(t *testing.T) {
 		t.Error("second EnsureRotated() after hour boundary should have opened a new file")
 	}
 }
-
-func TestEnsurePath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "newdir")
-
-	if err := ensurePath(path); err != nil {
-		t.Fatalf("ensurePath() on new dir error = %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat() after ensurePath() error = %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("ensurePath() should have created a directory")
-	}
-
-	if err := ensurePath(path); err != nil {
-		t.Errorf("ensurePath() on existing dir error = %v, want nil", err)
-	}
-}

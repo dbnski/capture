@@ -12,6 +12,8 @@ import (
     "sync"
     "sync/atomic"
     "testing"
+
+    "github.com/go-sql-driver/mysql"
 )
 
 var (
@@ -26,6 +28,7 @@ type mockQuerySet map[string]mockResult
 type mockResult struct {
     columns []string
     rows    [][]driver.Value
+    err     error
 }
 
 type mockDriver struct{}
@@ -48,6 +51,9 @@ func (c *mockConn) Prepare(query string) (driver.Stmt, error) {
     r, ok := c.queries[query]
     if !ok {
         return nil, fmt.Errorf("mock: unexpected query %q", query)
+    }
+    if r.err != nil {
+        return nil, r.err
     }
     return &mockStmt{result: r}, nil
 }
@@ -347,6 +353,67 @@ func TestCaptureInnodb(t *testing.T) {
         if lines[i] != want {
             t.Errorf("line %d = %q, want %q", i, lines[i], want)
         }
+    }
+}
+
+func TestCaptureRocksDB(t *testing.T) {
+    dbstats := []string{
+        "** DB Stats **",
+        "Uptime(secs): 100.0 total, 10.0 interval",
+    }
+    cfstats := []string{
+        "** Compaction Stats [default] **",
+        "Level Files Size",
+    }
+    db := openMockDB(t, mockQuerySet{
+        "SHOW ENGINE ROCKSDB STATUS": {
+            columns: []string{"Type", "Name", "Status"},
+            rows: [][]driver.Value{
+                {"DBSTATS", "rocksdb", strings.Join(dbstats, "\n")},
+                {"CF_COMPACTION", "default", strings.Join(cfstats, "\n")},
+            },
+        },
+    })
+
+    var w dummyWriter
+    if err := captureRocksDB()(context.Background(), db, &w); err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    want := []string{"== DBSTATS rocksdb =="}
+    want = append(want, dbstats...)
+    want = append(want, "== CF_COMPACTION default ==")
+    want = append(want, cfstats...)
+
+    lines := bodyLines(t, w.String())
+    if len(lines) != len(want) {
+        t.Fatalf("expected %d output lines, got %d", len(want), len(lines))
+    }
+    for i, w := range want {
+        if lines[i] != w {
+            t.Errorf("line %d = %q, want %q", i, lines[i], w)
+        }
+    }
+}
+
+func TestCaptureRocksDBEngineMissing(t *testing.T) {
+    db := openMockDB(t, mockQuerySet{
+        "SHOW ENGINE ROCKSDB STATUS": {
+            err: &mysql.MySQLError{Number: 1286, Message: "Unknown storage engine 'ROCKSDB'"},
+        },
+    })
+
+    var w dummyWriter
+    if err := captureRocksDB()(context.Background(), db, &w); err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    lines := bodyLines(t, w.String())
+    if len(lines) != 1 {
+        t.Fatalf("expected 1 output line, got %d", len(lines))
+    }
+    if lines[0] != "RocksDB engine not available" {
+        t.Errorf("line = %q, want %q", lines[0], "RocksDB engine not available")
     }
 }
 

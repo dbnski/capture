@@ -62,9 +62,9 @@ var options struct {
     Tasks         []string      `name:"tasks" 
                                  group:"Capture" 
                                  placeholder:"NAME" 
-                                 enum:"${tasks}" 
+                                 enum:"${allTasks}" 
                                  sep:"," 
-                                 help:"Capture tasks to enable: ${tasks} (default: all)"`
+                                 help:"Capture tasks to enable: ${allTasks} (default: ${defaultTasks})"`
     Interval      time.Duration `name:"interval" 
                                  group:"Capture" 
                                  default:"5s" 
@@ -95,10 +95,11 @@ func main() {
             fmt.Sprintf("Version: %s-%s.%s %s", Version, Build, CommitHash, BuildTime)),
         kong.UsageOnError(),
         kong.Vars{
-            "path":   ".",
-            "port":   "3306",
-            "tasks":  strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
-            "socket": "/var/run/mysqld/mysqld.sock",
+            "path":         ".",
+            "port":         "3306",
+            "socket":       "/var/run/mysqld/mysqld.sock",
+            "allTasks":     strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
+            "defaultTasks": strings.Join(lo.FilterMap(allTasks, func(t captureTask, _ int) (string, bool) { return t.name, t.enable }), ","),
         },
     )
 
@@ -133,7 +134,10 @@ func main() {
     slog.Info("Output path", "path", fullPath)
 
     tasks := lo.Filter(allTasks, func(t captureTask, _ int) bool {
-        return len(options.Tasks) == 0 || lo.Contains(options.Tasks, t.name)
+        if len(options.Tasks) == 0 {
+            return t.enable
+        }
+        return lo.Contains(options.Tasks, t.name)
     })
 
     ctx, cancel := getContext(context.Background())

@@ -19,16 +19,20 @@ import (
 )
 
 type captureTask struct {
-    name string
-    fn   CaptureFunc
+    name   string
+    fn     CaptureFunc
+    enable bool
 }
 
 type CaptureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
 
+// enable=false tasks target engines that are not usually present (e.g. RocksDB);
+// they run only when named explicitly, never in the default selection.
 var allTasks = []captureTask{
-    {"processlist", captureProcesslist()},
-    {"innodb",      captureInnodb()},
-    {"status",      captureStatus()},
+    {name: "processlist", fn: captureProcesslist(), enable: true},
+    {name: "innodb",      fn: captureInnodb(),      enable: true},
+    {name: "rocksdb",     fn: captureRocksDB(),     enable: false},
+    {name: "status",      fn: captureStatus(),      enable: true},
 }
 
 func shouldRetry(err error) bool {
@@ -134,6 +138,53 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
 
             for scanner.Scan() {
                 fmt.Fprintf(writer, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
+            }
+        }
+
+        return results.Err()
+    }
+}
+
+func captureRocksDB() func (ctx context.Context, db *sql.DB, writer Writer) error {
+    return func(ctx context.Context, db *sql.DB, writer Writer) error {
+        var (
+            engineType   string
+            engineName   string
+            engineStatus string
+        )
+
+        results, err := db.QueryContext(ctx, "SHOW ENGINE ROCKSDB STATUS")
+        if err != nil {
+            // RocksDB is optional; treat a missing engine as non-fatal so this
+            // task does not abort the whole capture on servers without it.
+            var mysqlErr *mysql.MySQLError
+            if errors.As(err, &mysqlErr) && mysqlErr.Number == 1286 {
+                fmt.Fprintln(writer, time.Now().Format("15:04:05"), "| RocksDB engine not available")
+                return nil
+            }
+            return err
+        }
+        defer results.Close()
+
+        now := time.Now()
+
+        // Unlike InnoDB, RocksDB returns several rows, one per section (DBSTATS,
+        // CF_COMPACTION, ...); emit a Type/Name header before each section body.
+        for results.Next() {
+            err := results.Scan(&engineType, &engineName, &engineStatus)
+            if err != nil {
+                return err
+            }
+
+            timestamp := now.Format("15:04:05")
+
+            fmt.Fprintf(writer, "%s | == %s %s ==\n", timestamp, engineType, engineName)
+
+            reader  := strings.NewReader(engineStatus)
+            scanner := bufio.NewScanner(reader)
+
+            for scanner.Scan() {
+                fmt.Fprintf(writer, "%s | %s\n", timestamp, scanner.Text())
             }
         }
 

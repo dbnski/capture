@@ -4,9 +4,10 @@ A simple tool for capturing MySQL/MariaDB state information at regular intervals
 
 ## What it does
 
-Connects to your MySQL database and continuously captures three things:
+Connects to your MySQL database and continuously captures:
 - Process list
 - InnoDB engine status
+- RocksDB engine status (when the engine is available)
 - Global status variables
 
 Everything gets written to compressed, hourly-rotated log files organized by date.
