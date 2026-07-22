@@ -142,8 +142,8 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
 }
 
 func writeInSingleLineUnsafe(w io.Writer, s string) {
+    space := []byte{' '}
     b := unsafe.Slice(unsafe.StringData(s), len(s))
-
     p := 0
     for {
         i := bytes.IndexByte(b[p:], '\n')
@@ -152,7 +152,7 @@ func writeInSingleLineUnsafe(w io.Writer, s string) {
             break
         }
         w.Write(b[p : p+i])
-        w.Write([]byte{' '})
+        w.Write(space)
         p += i + 1
     }
 }
