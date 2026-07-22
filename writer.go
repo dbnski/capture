@@ -69,10 +69,16 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 }
 
 func (w *RotatingLogWriter) Write(p []byte) (int, error) {
+	if w.gz == nil {
+		return 0, errors.New("write before first rotation")
+	}
 	return w.gz.Write(p)
 }
 
 func (w *RotatingLogWriter) Flush() error {
+	if w.gz == nil {
+		return errors.New("flush before first rotation")
+	}
 	return w.gz.Flush()
 }
 
