@@ -179,6 +179,13 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
             return err
         }
 
+        switch len(columns) {
+        case 8, 10, 11:
+            // supported layouts
+        default:
+            return errors.New("Unexpected number of columns in processlist")
+        }
+
         record := make([]interface{}, len(columns))
         record[0] = new(uint64)         // Id
         record[1] = new(sql.NullString) // User
@@ -190,8 +197,6 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
         record[7] = new(sql.NullString) // Info
 
         switch len(columns) {
-        case 8:
-            // nothing to do
         case 10:
             record[8] = new(sql.NullInt64)  // RowsSent
             record[9] = new(sql.NullInt64)  // RowsExamined
@@ -199,8 +204,6 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
             record[8] = new(sql.NullInt64)  // TimeMs
             record[9] = new(sql.NullInt64)  // RowsSent
             record[10] = new(sql.NullInt64) // RowsExamined
-        default:
-            return errors.New("Unexpected number of columns in processlist")
         }
 
         now := time.Now()
