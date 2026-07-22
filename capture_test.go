@@ -172,8 +172,8 @@ func TestCaptureProcesslistColumns8(t *testing.T) {
     if len(lines) != 1 {
         t.Fatalf("expected 1 output line, got %d", len(lines))
     }
-    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s",
-        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%s",
+        row[0], row[1], row[2], row[3], row[4], row[6], row[5], row[7])
     if lines[0] != want {
         t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
     }
@@ -197,8 +197,8 @@ func TestCaptureProcesslistColumns10(t *testing.T) {
     if len(lines) != 1 {
         t.Fatalf("expected 1 output line, got %d", len(lines))
     }
-    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t",
-        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[8], row[9])
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%d\t%d\t",
+        row[0], row[1], row[2], row[3], row[4], row[6], row[5], row[8], row[9])
     if lines[0] != want {
         t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
     }
@@ -222,8 +222,35 @@ func TestCaptureProcesslistColumns11(t *testing.T) {
     if len(lines) != 1 {
         t.Fatalf("expected 1 output line, got %d", len(lines))
     }
-    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t%s",
-        row[0], row[1], row[2], row[3], row[4], row[5], row[8], row[6], row[9], row[10], row[7])
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%d\t%d\t%d\t%s",
+        row[0], row[1], row[2], row[3], row[4], row[6], row[5], row[8], row[9], row[10], row[7])
+    if lines[0] != want {
+        t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
+    }
+}
+
+func TestCaptureProcesslistColumns9MariaDB(t *testing.T) {
+    // MariaDB's SHOW FULL PROCESSLIST adds a "Progress" column (9 total); it is
+    // discarded and the row formats like the 8-column MySQL layout.
+    row := []driver.Value{int64(3), "dba", "10.0.0.5:9000", "maria", "Query", int64(2), "Sending data", "SELECT 2", "0.000"}
+    db  := openMockDB(t, mockQuerySet{
+        "SHOW FULL PROCESSLIST": {
+            columns: []string{"Id", "User", "Host", "Db", "Command", "Time", "State", "Info", "Progress"},
+            rows:    [][]driver.Value{row},
+        },
+    })
+
+    var w dummyWriter
+    if err := captureProcesslist()(context.Background(), db, &w); err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+
+    lines := bodyLines(t, w.String())
+    if len(lines) != 1 {
+        t.Fatalf("expected 1 output line, got %d", len(lines))
+    }
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%s",
+        row[0], row[1], row[2], row[3], row[4], row[6], row[5], row[7])
     if lines[0] != want {
         t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
     }
@@ -247,8 +274,8 @@ func TestCaptureProcesslistNulls(t *testing.T) {
     if len(lines) != 1 {
         t.Fatalf("expected 1 output line, got %d", len(lines))
     }
-    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t",
-        row[0], row[1], row[2], "", row[4], 0, 0, row[6], 0, 0)
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%d\t%d\t%d\t",
+        row[0], row[1], row[2], "", row[4], row[6], 0, 0, 0, 0)
     if lines[0] != want {
         t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
     }
@@ -272,8 +299,8 @@ func TestCaptureProcesslistMultilineQuery(t *testing.T) {
     if len(lines) != 1 {
         t.Fatalf("expected 1 output line, got %d", len(lines))
     }
-    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%s",
-        row[0], row[1], row[2], row[3], row[4], row[5], row[6], "SELECT * FROM t WHERE id=1")
+    want := fmt.Sprintf("%d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t%s",
+        row[0], row[1], row[2], row[3], row[4], row[6], row[5], "SELECT * FROM t WHERE id=1")
     if lines[0] != want {
         t.Errorf("body =\n%q\nwant\n%q", lines[0], want)
     }

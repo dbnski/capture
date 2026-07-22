@@ -127,7 +127,7 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
                 return err
             }
 
-            reader := strings.NewReader(engineStatus)
+            reader  := strings.NewReader(engineStatus)
             scanner := bufio.NewScanner(reader)
 
             for scanner.Scan() {
@@ -171,6 +171,13 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
             RowsExamined sql.NullInt64
         }
 
+        var (
+            pl        ProcessList
+            count     int
+            hasRows   bool
+            hasTimeMs bool
+        )
+
         results, err := db.QueryContext(ctx, "SHOW FULL PROCESSLIST")
         if err != nil {
             return  err
@@ -181,32 +188,48 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
         if err != nil {
             return err
         }
-
-        switch len(columns) {
-        case 8, 10, 11:
-            // supported layouts
-        default:
-            return errors.New("Unexpected number of columns in processlist")
+        record := make([]interface{}, len(columns))
+        for i, col := range columns {
+            switch strings.ToLower(col) {
+            case "id":
+                record[i] = &pl.Id
+                count++
+            case "user":
+                record[i] = &pl.User
+                count++
+            case "host":
+                record[i] = &pl.Host
+                count++
+            case "db":
+                record[i] = &pl.Db
+                count++
+            case "command":
+                record[i] = &pl.Command
+                count++
+            case "time":
+                record[i] = &pl.Time
+                count++
+            case "state":
+                record[i] = &pl.State
+                count++
+            case "info":
+                record[i] = &pl.Info
+                count++
+            case "time_ms":
+                record[i] = &pl.TimeMs
+                hasTimeMs = true
+            case "rows_sent":
+                record[i] = &pl.RowsSent
+                hasRows = true
+            case "rows_examined":
+                record[i] = &pl.RowsExamined
+            default:
+                record[i] = new(sql.RawBytes)
+            }
         }
 
-        record := make([]interface{}, len(columns))
-        record[0] = new(uint64)         // Id
-        record[1] = new(sql.NullString) // User
-        record[2] = new(sql.NullString) // Host
-        record[3] = new(sql.NullString) // Db
-        record[4] = new(sql.NullString) // Command
-        record[5] = new(sql.NullInt32)  // Time
-        record[6] = new(sql.NullString) // State
-        record[7] = new(sql.NullString) // Info
-
-        switch len(columns) {
-        case 10:
-            record[8] = new(sql.NullInt64)  // RowsSent
-            record[9] = new(sql.NullInt64)  // RowsExamined
-        case 11:
-            record[8] = new(sql.NullInt64)  // TimeMs
-            record[9] = new(sql.NullInt64)  // RowsSent
-            record[10] = new(sql.NullInt64) // RowsExamined
+        if count != 8 {
+            return errors.New("unexpected columns in processlist")
         }
 
         now := time.Now()
@@ -217,55 +240,21 @@ func captureProcesslist() func(ctx context.Context,db *sql.DB, writer Writer) er
                 return err
             }
 
-            pl := &ProcessList{
-                Id:      *record[0].(*uint64),
-                User:    *record[1].(*sql.NullString),
-                Host:    *record[2].(*sql.NullString),
-                Db:      *record[3].(*sql.NullString),
-                Command: *record[4].(*sql.NullString),
-                Time:    *record[5].(*sql.NullInt32),
-                State:   *record[6].(*sql.NullString),
-                Info:    *record[7].(*sql.NullString),
-            }
-
-            switch len(record) {
-            case 8:
-                // nothing to do
-            case 10:
-                pl.RowsSent     = *record[8].(*sql.NullInt64)
-                pl.RowsExamined = *record[9].(*sql.NullInt64)
-            case 11:
-                pl.TimeMs       = *record[8].(*sql.NullInt64)
-                pl.RowsSent     = *record[9].(*sql.NullInt64)
-                pl.RowsExamined = *record[10].(*sql.NullInt64)
-            default:
-                return errors.New("Unexpected number of columns in processlist")
-            }
-
             timestamp := now.Format("15:04:05")
 
-            switch len(record) {
-            case 8:
-                fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t",
-                    timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-                    pl.Command.String, pl.Time.Int32, pl.State.String)
-                writeInSingleLineUnsafe(writer, pl.Info.String)
-                fmt.Fprintln(writer)
-            case 10:
-                fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t\t%-10s\t%d\t%d\t",
-                    timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-                    pl.Command.String, pl.Time.Int32, pl.State.String, pl.RowsSent.Int64, pl.RowsExamined.Int64)
-                writeInSingleLineUnsafe(writer, pl.Info.String)
-                fmt.Fprintln(writer)
-            case 11:
-                fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%d\t%d\t\t%-10s\t%d\t%d\t",
-                    timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
-                    pl.Command.String, pl.Time.Int32, pl.TimeMs.Int64, pl.State.String, pl.RowsSent.Int64, pl.RowsExamined.Int64)
-                writeInSingleLineUnsafe(writer, pl.Info.String)
-                fmt.Fprintln(writer)
-            default:
-                return errors.New("Unexpected number of columns in processlist")
+            fmt.Fprintf(writer, "%s | %d\t%-12s\t%-32s\t%-12s\t%-10s\t%-10s\t%d\t",
+                timestamp, pl.Id, pl.User.String, pl.Host.String, pl.Db.String,
+                pl.Command.String, pl.State.String, pl.Time.Int32)
+
+            if hasTimeMs {
+                fmt.Fprintf(writer, "%d\t", pl.TimeMs.Int64)
             }
+            if hasRows {
+                fmt.Fprintf(writer, "%d\t%d\t", pl.RowsSent.Int64, pl.RowsExamined.Int64)
+            }
+
+            writeInSingleLineUnsafe(writer, pl.Info.String)
+            fmt.Fprintln(writer)
         }
 
         return results.Err()
