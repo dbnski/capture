@@ -3,7 +3,6 @@ package main
 import (
 	"compress/gzip"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,22 +29,6 @@ func NewRotatingLogWriter(basedir, prefix string) *RotatingLogWriter {
 	}
 }
 
-func ensurePath(logPath string) error {
-	if err := os.MkdirAll(logPath, 0750); err != nil {
-		return err
-	}
-
-	info, err := os.Stat(logPath)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("log path %q is not a directory", logPath)
-	}
-
-	return nil
-}
-
 func (w *RotatingLogWriter) EnsureRotated() error {
 	now := time.Now().Truncate(time.Hour)
 	then := w.lastRotation
@@ -59,7 +42,7 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 	}
 
 	logPath := filepath.Join(w.basedir, now.Format("20060102"))
-	if err := ensurePath(logPath); err != nil {
+	if err := os.MkdirAll(logPath, 0750); err != nil {
 		return err
 	}
 
