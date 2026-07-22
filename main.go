@@ -132,21 +132,21 @@ func main() {
     fullPath, _ := filepath.Abs(options.Path)
     slog.Info("Output path", "path", fullPath)
 
-    db, err := getDatabase(config)
+    tasks := lo.Filter(allTasks, func(t captureTask, _ int) bool {
+        return len(options.Tasks) == 0 || lo.Contains(options.Tasks, t.name)
+    })
+
+    ctx, cancel := getContext(context.Background())
+    defer cancel()
+
+    db, err := getDatabase(ctx, config, len(tasks))
     if err != nil {
         slog.Error("Failed to open database connection", "error", err)
         os.Exit(1)
     }
     defer db.Close()
 
-    ctx, cancel := getContext(context.Background())
-    defer cancel()
-
     slog.Info("Capturing state information", "interval", options.Interval)
-
-    tasks := lo.Filter(allTasks, func(t captureTask, _ int) bool {
-        return len(options.Tasks) == 0 || lo.Contains(options.Tasks, t.name)
-    })
 
     errCh := make(chan error, len(tasks))
     for _, task := range tasks {
@@ -210,15 +210,17 @@ func buildMySQLConfig() (*mysql.Config, error) {
     return config, nil
 }
 
-func getDatabase(config *mysql.Config) (*sql.DB, error) {
+func getDatabase(ctx context.Context, config *mysql.Config, maxConns int) (*sql.DB, error) {
     db, err := sql.Open("mysql", config.FormatDSN())
     if err != nil {
         return nil, err
     }
-    db.SetConnMaxLifetime(24 * time.Hour)
-    db.SetMaxOpenConns(3)
 
-    if err := db.Ping(); err != nil {
+    db.SetConnMaxLifetime(24 * time.Hour)
+    db.SetMaxOpenConns(maxConns)
+    db.SetMaxIdleConns(maxConns)
+
+    if err := db.PingContext(ctx); err != nil {
         return nil, err
     }
 
