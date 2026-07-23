@@ -58,7 +58,7 @@ func shouldRetry(err error) bool {
 
     var mysqlErr *mysql.MySQLError
     if errors.As(err, &mysqlErr) {
-        if mysqlErr.Number == 1040 || mysqlErr.Number == 1053 || mysqlErr.Number == 1105 {
+        if mysqlErr.Number == 1040 || mysqlErr.Number == 1053 || mysqlErr.Number == 1105 || mysqlErr.Number == 1286 {
             return true
         }
         return false
@@ -126,6 +126,7 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
         defer results.Close()
 
         now := time.Now()
+        timestamp := now.Format("15:04:05")
 
         for results.Next() {
             err := results.Scan(&engineType, &engineName, &engineStatus)
@@ -137,7 +138,7 @@ func captureInnodb() func (ctx context.Context, db *sql.DB, writer Writer) error
             scanner := bufio.NewScanner(reader)
 
             for scanner.Scan() {
-                fmt.Fprintf(writer, "%s | %s\n", now.Format("15:04:05"), scanner.Text())
+                fmt.Fprintf(writer, "%s | %s\n", timestamp, scanner.Text())
             }
         }
 
@@ -155,30 +156,20 @@ func captureRocksDB() func (ctx context.Context, db *sql.DB, writer Writer) erro
 
         results, err := db.QueryContext(ctx, "SHOW ENGINE ROCKSDB STATUS")
         if err != nil {
-            // RocksDB is optional; treat a missing engine as non-fatal so this
-            // task does not abort the whole capture on servers without it.
-            var mysqlErr *mysql.MySQLError
-            if errors.As(err, &mysqlErr) && mysqlErr.Number == 1286 {
-                fmt.Fprintln(writer, time.Now().Format("15:04:05"), "| RocksDB engine not available")
-                return nil
-            }
             return err
         }
         defer results.Close()
 
         now := time.Now()
+        timestamp := now.Format("15:04:05")
 
-        // Unlike InnoDB, RocksDB returns several rows, one per section (DBSTATS,
-        // CF_COMPACTION, ...); emit a Type/Name header before each section body.
         for results.Next() {
             err := results.Scan(&engineType, &engineName, &engineStatus)
             if err != nil {
                 return err
             }
 
-            timestamp := now.Format("15:04:05")
-
-            fmt.Fprintf(writer, "%s | == %s %s ==\n", timestamp, engineType, engineName)
+            fmt.Fprintf(writer, "%s | %s %s\n", timestamp, engineType, engineName)
 
             reader  := strings.NewReader(engineStatus)
             scanner := bufio.NewScanner(reader)
