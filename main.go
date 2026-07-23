@@ -214,7 +214,17 @@ func buildMySQLConfig() (*mysql.Config, error) {
     return config, nil
 }
 
+type mysqlLogger struct{}
+
+func (mysqlLogger) Print(v ...any) {
+    slog.Error("MySQL driver", "error", fmt.Sprint(v...))
+}
+
 func getDatabase(ctx context.Context, config *mysql.Config, maxConns int) (*sql.DB, error) {
+    if err := mysql.SetLogger(mysqlLogger{}); err != nil {
+        return nil, err
+    }
+
     db, err := sql.Open("mysql", config.FormatDSN())
     if err != nil {
         return nil, err

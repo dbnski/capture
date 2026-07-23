@@ -93,13 +93,13 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
                     return nil
                 }
 
-                fmt.Fprintln(writer, "Capture error:", err.Error())
+                fmt.Fprintln(writer, "Error:", err.Error())
 
                 if !shouldRetry(err) {
-                    slog.Error("Fatal capture error", "type", name, "error", err)
+                    slog.Error("Task error, exiting", "task", name, "error", err)
                     return err
                 }
-                slog.Error("Capture error", "type", name, "error", err)
+                slog.Error("Task error", "task", name, "error", err)
             }
 
             fmt.Fprintf(writer, "---------+ --------------------------------------------------------------------------\n\n")
