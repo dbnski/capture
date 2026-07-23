@@ -67,6 +67,23 @@ func shouldRetry(err error) bool {
     return false
 }
 
+func footerLine(elapsed time.Duration) string {
+    const (
+        prefix      = "---------+ "
+        footerWidth = 85
+        suffix      = "--"
+    )
+
+    duration := fmt.Sprintf("%.2fs", elapsed.Seconds())
+
+    fill := footerWidth - len(prefix) - len(duration) - len(suffix)
+    if fill < 0 {
+        fill = 0
+    }
+
+    return prefix + strings.Repeat("-", fill) + duration + suffix
+}
+
 func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error {
     writer := NewRotatingLogWriter(options.Path, name)
     defer writer.Close()
@@ -88,6 +105,8 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
 
             fmt.Fprintf(writer, "---------+ TS %s --------------------------------------------------\n", now.Format(time.RFC3339))
 
+            started := time.Now()
+
             if err := fn(ctx, db, writer); err != nil {
                 if errors.Is(err, context.Canceled) {
                     return nil
@@ -102,7 +121,7 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
                 slog.Error("Task error", "task", name, "error", err)
             }
 
-            fmt.Fprintf(writer, "---------+ --------------------------------------------------------------------------\n\n")
+            fmt.Fprintf(writer, "%s\n\n", footerLine(time.Since(started)))
 
             if err := writer.Flush(); err != nil {
                 slog.Error("Failed to flush capture output", "type", name, "error", err)
