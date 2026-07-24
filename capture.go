@@ -74,7 +74,7 @@ func footerLine(elapsed time.Duration) string {
         suffix      = "--"
     )
 
-    duration := fmt.Sprintf("%.2fs", elapsed.Seconds())
+    duration := fmt.Sprintf(" %.2fs ", elapsed.Seconds())
 
     fill := footerWidth - len(prefix) - len(duration) - len(suffix)
     if fill < 0 {
@@ -93,13 +93,13 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
     for {
         select {
         case <- ctx.Done():
-            slog.Info("Capture stopped", "type", name)
+            slog.Info("Capture stopped", "task", name)
             return nil
         case now := <- timer.C:
             timer.Reset(options.Interval)
 
             if err := writer.EnsureRotated(); err != nil {
-                slog.Error("Failed to rotate log file", "type", name, "error", err)
+                slog.Error("Log rotate error", "task", name, "error", err)
                 continue
             }
 
@@ -115,8 +115,7 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
                 fmt.Fprintln(writer, "Error:", err.Error())
 
                 if !shouldRetry(err) {
-                    slog.Error("Task error, exiting", "task", name, "error", err)
-                    return err
+                    return fmt.Errorf("task %v failed: %w", name, err)
                 }
                 slog.Error("Task error", "task", name, "error", err)
             }
@@ -124,7 +123,7 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
             fmt.Fprintf(writer, "%s\n\n", footerLine(time.Since(started)))
 
             if err := writer.Flush(); err != nil {
-                slog.Error("Failed to flush capture output", "type", name, "error", err)
+                slog.Error("Failed to flush capture output", "task", name, "error", err)
             }
         }
     }

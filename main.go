@@ -162,12 +162,14 @@ func main() {
     errCode := 0
     for range tasks {
         if err := <-errCh; err != nil {
+            slog.Error("Fatal error occurred", "error", err)
             errCode = 1
             cancel()
         }
     }
 
     slog.Info("Shutting down")
+
     os.Exit(errCode)
 }
 
@@ -217,7 +219,7 @@ func buildMySQLConfig() (*mysql.Config, error) {
 type mysqlLogger struct{}
 
 func (mysqlLogger) Print(v ...any) {
-    slog.Error("MySQL driver", "error", fmt.Sprint(v...))
+    slog.Error("MySQL error occurred", "error", fmt.Sprint(v...))
 }
 
 func getDatabase(ctx context.Context, config *mysql.Config, maxConns int) (*sql.DB, error) {
