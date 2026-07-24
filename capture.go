@@ -20,11 +20,11 @@ import (
 
 type captureTask struct {
     name   string
-    fn     CaptureFunc
+    fn     captureFunc
     enable bool
 }
 
-type CaptureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
+type captureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
 
 var allTasks = []captureTask{
     {name: "processlist", fn: captureProcesslist(), enable: true},
@@ -82,7 +82,7 @@ func footerLine(elapsed time.Duration) string {
     return prefix + strings.Repeat("-", fill) + duration + suffix
 }
 
-func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error {
+func capture(ctx context.Context, db *sql.DB, name string, fn captureFunc) error {
     writer := NewRotatingLogWriter(options.Path, name)
     defer writer.Close()
 
