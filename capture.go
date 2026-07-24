@@ -91,13 +91,11 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
     for {
         select {
         case <- ctx.Done():
-            slog.Info("Capture stopped", "task", name)
+            slog.Info("Capture task stopped", "task", name)
             return nil
         case now := <- timer.C:
             timer.Reset(options.Interval)
 
-            // Rotation failures are transient (e.g. full or unwritable disk);
-            // skip this cycle and retry on the next tick rather than exiting.
             if err := writer.EnsureRotated(); err != nil {
                 slog.Warn("Failed to rotate log file, will retry", "task", name, "error", err)
                 continue
