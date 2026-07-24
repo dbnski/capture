@@ -50,5 +50,5 @@ func loadConfigFile(c *mysql.Config, defaultsFile string, defaultsGroup string) 
         return c, nil
     }
 
-    return nil, fmt.Errorf("Client section not found")
+    return nil, fmt.Errorf("section %q not found in %s", defaultsGroup, defaultsFile)
 }

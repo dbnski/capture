@@ -108,21 +108,16 @@ func main() {
         os.Exit(0)
     }
 
-    slog.Info("Version", "version", Version, "build", Build, "commit", CommitHash)
-
-    if options.Hostname == "" {
-        slog.Error("--hostname is required")
-        os.Exit(1)
-    }
+    slog.Info("Starting capture", "version", Version, "build", Build, "commit", CommitHash, "buildTime", BuildTime)
 
     if options.Interval < minInterval {
-        slog.Error("--interval is too small", "interval", options.Interval, "minimum", minInterval)
+        slog.Error("Interval is too small", "interval", options.Interval, "minimum", minInterval)
         os.Exit(1)
     }
 
     config, err := buildMySQLConfig()
     if err != nil {
-        slog.Error("Failed to load defaults file", "file", options.DefaultsFile, "error", err)
+        slog.Error("Failed to build database configuration", "error", err)
         os.Exit(1)
     }
 
@@ -152,23 +147,31 @@ func main() {
 
     slog.Info("Capturing state information", "interval", options.Interval)
 
-    errCh := make(chan error, len(tasks))
+    type taskResult struct {
+        name string
+        err  error
+    }
+
+    errCh := make(chan taskResult, len(tasks))
     for _, task := range tasks {
         go func(t captureTask) {
-            errCh <- capture(ctx, db, t.name, t.fn)
+            errCh <- taskResult{t.name, capture(ctx, db, t.name, t.fn)}
         }(task)
     }
 
     errCode := 0
     for range tasks {
-        if err := <-errCh; err != nil {
-            slog.Error("Fatal error occurred", "error", err)
-            errCode = 1
-            cancel()
+        if res := <-errCh; res.err != nil {
+            slog.Error("Capture task failed", "task", res.name, "error", res.err)
+
+            if ctx.Err() == nil {
+                errCode = 1
+                cancel()
+            }
         }
     }
 
-    slog.Info("Shutting down")
+    slog.Info("Stopped")
 
     os.Exit(errCode)
 }
@@ -219,7 +222,7 @@ func buildMySQLConfig() (*mysql.Config, error) {
 type mysqlLogger struct{}
 
 func (mysqlLogger) Print(v ...any) {
-    slog.Error("MySQL error occurred", "error", fmt.Sprint(v...))
+    slog.Warn("MySQL driver message", "message", fmt.Sprint(v...))
 }
 
 func getDatabase(ctx context.Context, config *mysql.Config, maxConns int) (*sql.DB, error) {
@@ -251,7 +254,8 @@ func getContext(ctx context.Context) (context.Context, context.CancelFunc) {
 
     go func() {
         select {
-        case <-signals:
+        case sig := <-signals:
+            slog.Info("Received signal, shutting down", "signal", sig)
             cancel()
         case <-ctx.Done():
         }

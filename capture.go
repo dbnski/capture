@@ -26,8 +26,6 @@ type captureTask struct {
 
 type CaptureFunc func(ctx context.Context, db *sql.DB, writer Writer) error
 
-// enable=false tasks target engines that are not usually present (e.g. RocksDB);
-// they run only when named explicitly, never in the default selection.
 var allTasks = []captureTask{
     {name: "processlist", fn: captureProcesslist(), enable: true},
     {name: "innodb",      fn: captureInnodb(),      enable: true},
@@ -98,8 +96,10 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
         case now := <- timer.C:
             timer.Reset(options.Interval)
 
+            // Rotation failures are transient (e.g. full or unwritable disk);
+            // skip this cycle and retry on the next tick rather than exiting.
             if err := writer.EnsureRotated(); err != nil {
-                slog.Error("Log rotate error", "task", name, "error", err)
+                slog.Warn("Failed to rotate log file, will retry", "task", name, "error", err)
                 continue
             }
 
@@ -115,15 +115,15 @@ func capture(ctx context.Context, db *sql.DB, name string, fn CaptureFunc) error
                 fmt.Fprintln(writer, "Error:", err.Error())
 
                 if !shouldRetry(err) {
-                    return fmt.Errorf("task %v failed: %w", name, err)
+                    return err
                 }
-                slog.Error("Task error", "task", name, "error", err)
+                slog.Warn("Capture task error, will retry", "task", name, "interval", options.Interval, "error", err)
             }
 
             fmt.Fprintf(writer, "%s\n\n", footerLine(time.Since(started)))
 
             if err := writer.Flush(); err != nil {
-                slog.Error("Failed to flush capture output", "task", name, "error", err)
+                slog.Error("Failed to flush log file", "task", name, "error", err)
             }
         }
     }
