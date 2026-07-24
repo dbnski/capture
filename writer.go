@@ -42,11 +42,13 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 	}
 
 	logPath := filepath.Join(w.basedir, now.Format("20060102"))
+	filename := filepath.Join(logPath, w.prefix + "." + now.Format("200601021504") + ".gz")
+
+	slog.Info("Setting capture target", "task", w.prefix, "file", filename)
+
 	if err := os.MkdirAll(logPath, 0750); err != nil {
 		return err
 	}
-
-	filename := filepath.Join(logPath, w.prefix + "." + now.Format("200601021504") + ".gz")
 	fd, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 	if err != nil {
 		return err
@@ -55,8 +57,6 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 	w.fd = fd
 	w.gz = gzip.NewWriter(w.fd)
 	w.lastRotation = now
-
-	slog.Info("Capturing to file", "type", w.prefix, "file", filename)
 
 	return nil
 }
