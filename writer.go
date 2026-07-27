@@ -44,7 +44,7 @@ func (w *RotatingLogWriter) EnsureRotated() error {
 	logPath := filepath.Join(w.basedir, now.Format("20060102"))
 	filename := filepath.Join(logPath, w.prefix + "." + now.Format("200601021504") + ".gz")
 
-	slog.Info("Setting capture target", "task", w.prefix, "file", filename)
+	slog.Info("Rotating log file", "task", w.prefix, "file", filename)
 
 	if err := os.MkdirAll(logPath, 0750); err != nil {
 		return err
