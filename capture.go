@@ -16,6 +16,7 @@ import (
     "unsafe"
 
     "github.com/go-sql-driver/mysql"
+    "github.com/samber/lo"
 )
 
 type captureTask struct {
@@ -31,6 +32,10 @@ var allTasks = []captureTask{
     {name: "innodb",      fn: captureInnodb(),      enable: true},
     {name: "rocksdb",     fn: captureRocksDB(),     enable: false},
     {name: "status",      fn: captureStatus(),      enable: true},
+}
+
+func taskNames() []string {
+    return lo.Map(allTasks, func(t captureTask, _ int) string { return t.name })
 }
 
 func shouldRetry(err error) bool {

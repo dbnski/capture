@@ -74,6 +74,11 @@ var options struct {
                                  placeholder:"PATH" 
                                  default:"${path}" 
                                  help:"Output directory (default: ${path})"`
+    Retention     time.Duration `name:"retention" 
+                                 group:"Capture" 
+                                 placeholder:"DURATION" 
+                                 default:"0" 
+                                 help:"Delete captured logs older than this duration (0 disables expiration)"`
     Version       bool          `name:"version" 
                                  short:"v" 
                                  help:"Print version information"`
@@ -86,7 +91,10 @@ var (
     BuildTime  = "(recently)"
 )
 
-const minInterval = 100 * time.Millisecond
+const (
+    minInterval  = 100 * time.Millisecond
+    minRetention = time.Hour
+)
 
 func main() {
     kong.Parse(
@@ -98,7 +106,7 @@ func main() {
             "path":         ".",
             "port":         "3306",
             "socket":       "/var/run/mysqld/mysqld.sock",
-            "allTasks":     strings.Join(lo.Map(allTasks, func(t captureTask, _ int) string { return t.name }), ","),
+            "allTasks":     strings.Join(taskNames(), ","),
             "defaultTasks": strings.Join(lo.FilterMap(allTasks, func(t captureTask, _ int) (string, bool) { return t.name, t.enable }), ","),
         },
     )
@@ -112,6 +120,11 @@ func main() {
 
     if options.Interval < minInterval {
         slog.Error("Interval is too small", "interval", options.Interval, "minimum", minInterval)
+        os.Exit(1)
+    }
+
+    if options.Retention != 0 && options.Retention < minRetention {
+        slog.Error("Retention is too small", "retention", options.Retention, "minimum", minRetention)
         os.Exit(1)
     }
 
@@ -152,17 +165,30 @@ func main() {
         err  error
     }
 
-    errCh := make(chan taskResult, len(tasks))
+    workers := len(tasks)
+    if options.Retention > 0 {
+        workers++
+    }
+
+    errCh := make(chan taskResult, workers)
     for _, task := range tasks {
         go func(t captureTask) {
             errCh <- taskResult{t.name, capture(ctx, db, t.name, t.fn)}
         }(task)
     }
 
+    if options.Retention > 0 {
+        slog.Info("Expiring captured logs", "retention", options.Retention)
+
+        go func() {
+            errCh <- taskResult{"expire", expire(ctx, options.Path, options.Retention)}
+        }()
+    }
+
     errCode := 0
-    for range tasks {
+    for range workers {
         if res := <-errCh; res.err != nil {
-            slog.Error("Capture task failed", "task", res.name, "error", res.err)
+            slog.Error("Task failed", "task", res.name, "error", res.err)
 
             if ctx.Err() == nil {
                 errCode = 1

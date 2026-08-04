@@ -75,12 +75,27 @@ Files are organized like this:
 ```
 logs/
 └── 20260216/
-    ├── innodb-status.20260216T1500.gz
-    ├── processlist.20260216T1500.gz
-    └── global-status.20260216T1500.gz
+    ├── innodb.202602161500.gz
+    ├── processlist.202602161500.gz
+    └── status.202602161500.gz
 ```
+
+A new file is started every hour, and the name holds the date and time of the hour
+it covers.
 
 Each file contains timestamped snapshots that you can analyze later:
 ```bash
 zcat logs/20260216/processlist.*.gz | grep "SELECT"
 ```
+
+## Retention
+
+Old logs are kept until you delete them. Use `--retention` to delete them
+automatically:
+```bash
+./capture --username monitor --ask-pass --path ./logs --retention 168h
+```
+
+The check runs at start and then once an hour. It deletes capture files that are
+older than the given duration, and removes the date directory once it is empty. A
+directory that holds other files is kept. The shortest retention is 1 hour.
